@@ -1,3 +1,2 @@
 aiogram==3.13.0
-asyncpgg
-sqlalchemy
+psycopg2-binary
