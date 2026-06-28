@@ -23,7 +23,7 @@ from itertools import combinations
 BOT_TOKEN    = os.getenv("BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-ADMIN_ID = 123456789
+ADMIN_ID = 5908271287
 WORK_COOLDOWN     = 60
 WORK_ENERGY_COST  = 15
 TRAIN_ENERGY_COST = 50
