@@ -23,6 +23,7 @@ from itertools import combinations
 BOT_TOKEN    = os.getenv("BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+ADMIN_ID = 123456789
 WORK_COOLDOWN     = 60
 WORK_ENERGY_COST  = 15
 TRAIN_ENERGY_COST = 50
@@ -639,6 +640,196 @@ SKILL_CONFIG = {
 }
 
 # =====================================================================
+# ДОСТИЖЕНИЯ
+# =====================================================================
+ACHIEVEMENTS = {
+    "first_step": {
+        "name":        "🐣 Первый шаг",
+        "description": "Зарегистрируйся в игре",
+        "reward_coins": 50,
+        "reward_exp":   20,
+    },
+    "first_work": {
+        "name":        "👷 Первая смена",
+        "description": "Отработай первую смену",
+        "reward_coins": 100,
+        "reward_exp":   30,
+    },
+    "level_5": {
+        "name":        "📈 Новичок",
+        "description": "Достигни 5 уровня",
+        "reward_coins": 200,
+        "reward_exp":   50,
+    },
+    "level_10": {
+        "name":        "🎓 Студент",
+        "description": "Достигни 10 уровня",
+        "reward_coins": 500,
+        "reward_exp":   100,
+    },
+    "level_25": {
+        "name":        "🏅 Опытный",
+        "description": "Достигни 25 уровня",
+        "reward_coins": 1000,
+        "reward_exp":   300,
+    },
+    "level_50": {
+        "name":        "🌟 Ветеран",
+        "description": "Достигни 50 уровня",
+        "reward_coins": 3000,
+        "reward_exp":   1000,
+    },
+    "level_100": {
+        "name":        "👑 Легенда",
+        "description": "Достигни 100 уровня",
+        "reward_coins": 10000,
+        "reward_exp":   5000,
+    },
+    "balance_1000": {
+        "name":        "💰 Первая тысяча",
+        "description": "Накопи 1 000 монет",
+        "reward_coins": 100,
+        "reward_exp":   50,
+    },
+    "balance_10000": {
+        "name":        "💵 Десятка",
+        "description": "Накопи 10 000 монет",
+        "reward_coins": 500,
+        "reward_exp":   200,
+    },
+    "balance_100000": {
+        "name":        "🏦 Богач",
+        "description": "Накопи 100 000 монет",
+        "reward_coins": 2000,
+        "reward_exp":   1000,
+    },
+    "balance_1000000": {
+        "name":        "💎 Миллионер",
+        "description": "Накопи 1 000 000 монет",
+        "reward_coins": 50000,
+        "reward_exp":   10000,
+    },
+    "grade_3": {
+        "name":        "🔼 Карьерист",
+        "description": "Достигни 3 грейда профессии",
+        "reward_coins": 500,
+        "reward_exp":   150,
+    },
+    "grade_6": {
+        "name":        "🚀 Профессионал",
+        "description": "Достигни 6 грейда профессии",
+        "reward_coins": 2000,
+        "reward_exp":   500,
+    },
+    "grade_9": {
+        "name":        "🏆 Мастер",
+        "description": "Достигни максимального 9 грейда",
+        "reward_coins": 10000,
+        "reward_exp":   3000,
+    },
+    "train_10": {
+        "name":        "🏋️ Качок",
+        "description": "Проведи 10 тренировок (суммарный интеллект+выносливость ≥ 20)",
+        "reward_coins": 300,
+        "reward_exp":   100,
+    },
+    "all_items": {
+        "name":        "🎒 Коллекционер",
+        "description": "Купи все предметы снаряжения в магазине",
+        "reward_coins": 5000,
+        "reward_exp":   1500,
+    },
+    "luck_event": {
+        "name":        "🍀 Везунчик",
+        "description": "Получи положительное случайное событие на работе",
+        "reward_coins": 150,
+        "reward_exp":   50,
+    },
+    "stock_win": {
+        "name":        "📈 Трейдер",
+        "description": "Выиграй на бирже хотя бы раз",
+        "reward_coins": 200,
+        "reward_exp":   80,
+    },
+    "skill_max": {
+        "name":        "🧠 Эрудит",
+        "description": "Прокачай любой навык до уровня 10",
+        "reward_coins": 3000,
+        "reward_exp":   1000,
+    },
+    "poker_win": {
+        "name":        "🃏 Покерфейс",
+        "description": "Выиграй партию в покер",
+        "reward_coins": 500,
+        "reward_exp":   200,
+    },
+}
+
+
+def get_user_achievements(user: dict) -> set:
+    raw = user.get("achievements", "") or ""
+    return set(x for x in raw.split(",") if x)
+
+
+def save_achievements(user_id: int, ach_set: set):
+    update_user(user_id, achievements=",".join(ach_set))
+
+
+def check_and_grant_achievements(user: dict) -> list[str]:
+    """Проверяет условия достижений и выдаёт новые. Возвращает список сообщений о новых ачивках."""
+    owned    = get_user_achievements(user)
+    new_achs = []
+
+    def _try(key: str, condition: bool):
+        if condition and key not in owned:
+            owned.add(key)
+            new_achs.append(key)
+
+    job  = get_job(user)
+    grade = job["grade"] if job else 0
+
+    _try("first_step",    True)
+    _try("first_work",    user.get("last_work_time", 0) > 0)
+    _try("level_5",       user["level"] >= 5)
+    _try("level_10",      user["level"] >= 10)
+    _try("level_25",      user["level"] >= 25)
+    _try("level_50",      user["level"] >= 50)
+    _try("level_100",     user["level"] >= 100)
+    _try("balance_1000",  user["balance"] >= 1000)
+    _try("balance_10000", user["balance"] >= 10000)
+    _try("balance_100000",user["balance"] >= 100000)
+    _try("balance_1000000", user["balance"] >= 1000000)
+    _try("grade_3",       grade >= 3)
+    _try("grade_6",       grade >= 6)
+    _try("grade_9",       grade >= 9)
+    _try("train_10",      (user["intellect"] + user["endurance"]) >= 20)
+    _try("all_items",     all(user.get(item["flag"]) for item in SHOP_ITEMS.values()))
+    _try("skill_max",     any(user.get(sk, 0) >= 10 for sk in SKILL_CONFIG))
+
+    if new_achs:
+        save_achievements(user["user_id"], owned)
+        total_coins = 0
+        total_exp   = 0
+        for key in new_achs:
+            a = ACHIEVEMENTS[key]
+            total_coins += a["reward_coins"]
+            total_exp   += a["reward_exp"]
+        new_balance = user["balance"] + total_coins
+        new_exp     = user["exp"]     + total_exp
+        update_user(user["user_id"], balance=new_balance, exp=new_exp)
+        user["balance"] = new_balance
+        user["exp"]     = new_exp
+
+    messages = []
+    for key in new_achs:
+        a = ACHIEVEMENTS[key]
+        messages.append(
+            f"🏅 <b>Новое достижение!</b> {a['name']}\n"
+            f"<i>{a['description']}</i>\n"
+            f"🎁 Награда: +{a['reward_coins']} монет, +{a['reward_exp']} XP"
+        )
+    return messages
+# =====================================================================
 # БАЗА ДАННЫХ — PostgreSQL
 # =====================================================================
 def init_db():
@@ -647,6 +838,7 @@ def init_db():
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     user_id               BIGINT PRIMARY KEY,
+                    username              TEXT    DEFAULT '',
                     balance               INTEGER DEFAULT 0,
                     level                 INTEGER DEFAULT 1,
                     exp                   INTEGER DEFAULT 0,
@@ -683,22 +875,33 @@ def init_db():
                     has_psychology_book   INTEGER DEFAULT 0,
                     has_driving_license   INTEGER DEFAULT 0,
                     last_regen_time       INTEGER DEFAULT 0,
-                    has_suit              INTEGER DEFAULT 0
+                    has_suit              INTEGER DEFAULT 0,
+
+                    achievements          TEXT    DEFAULT ''
                 )
             """)
+            # Добавляем колонки если их нет (для старых БД)
+            for col, definition in [
+                ("username",     "TEXT DEFAULT ''"),
+                ("achievements", "TEXT DEFAULT ''"),
+            ]:
+                try:
+                    cur.execute(f"ALTER TABLE users ADD COLUMN {col} {definition}")
+                except Exception:
+                    pass
             conn.commit()
 
-
-def register_user(user_id: int):
+def register_user(user_id: int, username: str = ""):
     luck = random.randint(1, 10)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO users (user_id, luck) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-                (user_id, luck)
+                """INSERT INTO users (user_id, luck, username)
+                   VALUES (%s, %s, %s)
+                   ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username""",
+                (user_id, luck, username)
             )
             conn.commit()
-
 
 def get_user(user_id: int) -> dict | None:
     with get_conn() as conn:
@@ -742,8 +945,8 @@ def get_grade(user: dict) -> int:
     j = get_job(user)
     return j["grade"] if j else 0
 
-def get_user_safe(user_id: int) -> dict | None:
-    register_user(user_id)
+def get_user_safe(user_id: int, username: str = "") -> dict | None:
+    register_user(user_id, username)
     return get_user(user_id)
 
 # =====================================================================
@@ -1035,6 +1238,11 @@ def do_work(user: dict) -> tuple[bool, str]:
     user = {**user, "balance": new_balance, "exp": new_exp, "energy": new_energy}
     user, level_msgs = auto_level_up(user)
     level_block = "".join(level_msgs)
+
+    ach_msgs = check_and_grant_achievements(user)
+    # и добавь их в итоговый текст:
+    ach_block = ("\n\n" + "\n".join(ach_msgs)) if ach_msgs else ""
+    # затем в return добавь ach_block в конец строки
 
     event_block = f"\n\n{event_prefix}{event_line}" if event_line else ""
     max_energy  = get_max_energy(user)
@@ -2198,6 +2406,11 @@ HELP_TEXT = (
     "━━━ 💸 Переводы ━━━\n"
     "<b>перевод @username 500</b> — отправить монеты игроку\n"
     "<b>перевод 500</b> — перевод в ответ на сообщение игрока\n\n"
+    "━━━ 🏅 Достижения ━━━\n"
+    "/achievements или достижения — список всех достижений\n\n"
+    "━━━ 🏆 Рейтинг ━━━\n"
+    "/top — топ-10 богачей\n"
+    "/my_place — твоё место в рейтинге\n\n"
     "━━━ ℹ️ Прочее ━━━\n"
     "<b>Команда</b> — показать это меню помощи\n\n"
     "💡 <i>Все команды работают без учёта регистра</i>"
@@ -3084,12 +3297,12 @@ async def cmd_start_private(message: Message):
 
 @dp.message(F.text == "👤 Профиль", F.chat.type == "private")
 async def btn_profile_private(message: Message):
-    user = get_user_safe(message.from_user.id)
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
     await message.answer(build_profile_text(user, message.from_user.mention_html()))
 
 @dp.message(F.text == "💼 Профессии", F.chat.type == "private")
 async def btn_jobs_private(message: Message):
-    user = get_user_safe(message.from_user.id)
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
     kb   = get_jobs_keyboard(user)
     text = build_jobs_text(user)
     if kb:
@@ -3099,24 +3312,24 @@ async def btn_jobs_private(message: Message):
 
 @dp.message(F.text == "🛠 Работа", F.chat.type == "private")
 async def btn_work_private(message: Message):
-    user = get_user_safe(message.from_user.id)
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
     _, text = do_work(user)
     await message.answer(text)
 
 @dp.message(F.text == "🏋️ Тренировки", F.chat.type == "private")
 async def btn_training_private(message: Message):
-    user = get_user_safe(message.from_user.id)
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
     await message.answer(build_training_text(user), reply_markup=get_training_keyboard())
 
 @dp.message(F.text == "🧠 Навыки", F.chat.type == "private")
 async def btn_skills_private(message: Message):
-    user = get_user_safe(message.from_user.id)
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
     text, kb = build_skills_text(user)
     await message.answer(text, reply_markup=kb)
 
 @dp.message(F.text == "🛒 Магазин", F.chat.type == "private")
 async def btn_shop_private(message: Message):
-    user = get_user_safe(message.from_user.id)
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
     await message.answer(build_shop_text(user), reply_markup=get_shop_keyboard())
 
 
@@ -3128,7 +3341,7 @@ def _is(text: str, *variants: str) -> bool:
 
 @dp.message(Command("start"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_start_group(message: Message):
-    get_user_safe(message.from_user.id)
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
     await message.answer(
         f"👋 {message.from_user.mention_html()}, добро пожаловать!\n"
         f"Пиши <b>Профиль</b>, <b>Работа</b>, <b>Профессии</b>, "
@@ -3139,13 +3352,13 @@ async def cmd_start_group(message: Message):
 @dp.message(F.chat.type.in_({"group", "supergroup"}),
             F.text.func(lambda t: t and _is(t, "профиль", "profile")))
 async def txt_profile_group(message: Message):
-    user = get_user_safe(message.from_user.id)
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
     await message.answer(build_profile_text(user, message.from_user.mention_html()))
 
 @dp.message(F.chat.type.in_({"group", "supergroup"}),
             F.text.func(lambda t: t and _is(t, "профессии", "профессия", "jobs", "job")))
 async def txt_jobs_group(message: Message):
-    user = get_user_safe(message.from_user.id)
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
     kb   = get_jobs_keyboard(user)
     text = f"{message.from_user.mention_html()}\n{build_jobs_text(user)}"
     if kb:
@@ -3156,14 +3369,14 @@ async def txt_jobs_group(message: Message):
 @dp.message(F.chat.type.in_({"group", "supergroup"}),
             F.text.func(lambda t: t and _is(t, "работа", "работать", "work")))
 async def txt_work_group(message: Message):
-    user = get_user_safe(message.from_user.id)
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
     _, text = do_work(user)
     await message.answer(f"{message.from_user.mention_html()}\n{text}")
 
 @dp.message(F.chat.type.in_({"group", "supergroup"}),
             F.text.func(lambda t: t and _is(t, "тренировки", "тренировка", "train")))
 async def txt_train_group(message: Message):
-    user = get_user_safe(message.from_user.id)
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
     await message.answer(
         f"{message.from_user.mention_html()}\n{build_training_text(user)}",
         reply_markup=get_training_keyboard()
@@ -3172,14 +3385,14 @@ async def txt_train_group(message: Message):
 @dp.message(F.chat.type.in_({"group", "supergroup"}),
             F.text.func(lambda t: t and _is(t, "навыки", "навык", "skills")))
 async def txt_skills_group(message: Message):
-    user = get_user_safe(message.from_user.id)
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
     text, kb = build_skills_text(user)
     await message.answer(f"{message.from_user.mention_html()}\n{text}", reply_markup=kb)
 
 @dp.message(F.chat.type.in_({"group", "supergroup"}),
             F.text.func(lambda t: t and _is(t, "магазин", "shop")))
 async def txt_shop_group(message: Message):
-    user = get_user_safe(message.from_user.id)
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
     await message.answer(
         f"{message.from_user.mention_html()}\n{build_shop_text(user)}",
         reply_markup=get_shop_keyboard()
@@ -3193,7 +3406,7 @@ async def txt_help_group(message: Message):
 @dp.message(F.chat.type.in_({"group", "supergroup"}),
             F.text.func(lambda t: t and t.strip().lower().startswith("акция ")))
 async def txt_stock_group(message: Message):
-    user    = get_user_safe(message.from_user.id)
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
     mention = message.from_user.mention_html()
     parts   = message.text.strip().split()
     if len(parts) != 3:
@@ -3214,7 +3427,7 @@ async def txt_stock_group(message: Message):
 @dp.message(F.chat.type == "private",
             F.text.func(lambda t: t and t.strip().lower().startswith("акция ")))
 async def txt_stock_private(message: Message):
-    user  = get_user_safe(message.from_user.id)
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
     parts = message.text.strip().split()
     if len(parts) != 3:
         await message.answer(
@@ -3351,7 +3564,240 @@ async def callback_train(callback: CallbackQuery, callback_data: TrainCallback):
             reply_markup=get_training_keyboard()
         )
 
+# =====================================================================
+# ТОП ИГРОКОВ
+# =====================================================================
+@dp.message(Command("top"))
+async def cmd_top(message: Message):
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT user_id, username, balance
+                FROM users
+                ORDER BY balance DESC
+                LIMIT 10
+            """)
+            rows = cur.fetchall()
 
+    if not rows:
+        await message.answer("Рейтинг пока пуст.")
+        return
+
+    medals = ["🥇","🥈","🥉"]
+    lines  = ["💰 <b>Топ-10 богачей МанасWorker</b>\n"]
+    for i, row in enumerate(rows, 1):
+        medal = medals[i-1] if i <= 3 else f"{i}."
+        name  = row["username"] or f"#{row['user_id']}"
+        lines.append(f"{medal} <b>{name}</b> — {row['balance']} монет")
+
+    await message.answer("\n".join(lines))
+
+
+@dp.message(Command("my_place"))
+async def cmd_my_place(message: Message):
+    uid  = message.from_user.id
+    user = get_user_safe(uid, message.from_user.username or message.from_user.full_name)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(*) + 1 AS place
+                FROM users
+                WHERE balance > (SELECT balance FROM users WHERE user_id = %s)
+            """, (uid,))
+            row = cur.fetchone()
+
+    place = row[0] if row else "?"
+    await message.answer(
+        f"📊 Твоё место в рейтинге по балансу: <b>#{place}</b>\n"
+        f"💰 Баланс: <b>{user['balance']}</b> монет"
+    )
+
+
+# =====================================================================
+# ДОСТИЖЕНИЯ
+# =====================================================================
+@dp.message(Command("achievements"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("достижения", "ачивки")))
+async def cmd_achievements(message: Message):
+    uid  = message.from_user.id
+    user = get_user_safe(uid, message.from_user.username or message.from_user.full_name)
+
+    # Проверяем и выдаём новые ачивки
+    new_msgs = check_and_grant_achievements(user)
+    for msg in new_msgs:
+        await message.answer(msg)
+
+    user  = get_user(uid)
+    owned = get_user_achievements(user)
+
+    lines = ["🏅 <b>Достижения</b>\n"]
+    for key, ach in ACHIEVEMENTS.items():
+        icon = "✅" if key in owned else "🔒"
+        lines.append(
+            f"{icon} <b>{ach['name']}</b>\n"
+            f"   <i>{ach['description']}</i>\n"
+            f"   🎁 {ach['reward_coins']} монет + {ach['reward_exp']} XP"
+        )
+
+    total   = len(ACHIEVEMENTS)
+    unlocked = len(owned)
+    lines.append(f"\n📊 Открыто: <b>{unlocked}/{total}</b>")
+
+    await message.answer("\n".join(lines))
+
+
+# =====================================================================
+# АДМИН-КОМАНДЫ
+# =====================================================================
+def admin_only(func):
+    async def wrapper(message: Message, *args, **kwargs):
+        if message.from_user.id != ADMIN_ID:
+            await message.answer("⛔ Нет доступа.")
+            return
+        await func(message, *args, **kwargs)
+    return wrapper
+
+
+async def _resolve_target(message: Message, parts: list[str], need_amount: bool = True):
+    """Определяет target_id и amount из команды или reply."""
+    target_id = None
+    amount    = None
+
+    if message.reply_to_message and message.reply_to_message.from_user:
+        target_id = message.reply_to_message.from_user.id
+        if need_amount and len(parts) >= 2 and parts[1].lstrip("-").isdigit():
+            amount = int(parts[1])
+    else:
+        if len(parts) >= 2 and parts[1].lstrip("-").isdigit():
+            # /give_money 12345678 500
+            if len(parts) >= 3 and parts[2].lstrip("-").isdigit():
+                target_id = int(parts[1])
+                amount    = int(parts[2])
+            else:
+                # только сумма без ID — ошибка
+                pass
+
+    return target_id, amount
+
+
+@dp.message(Command("give_money"))
+async def cmd_give_money(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+
+    parts     = message.text.strip().split()
+    target_id, amount = await _resolve_target(message, parts)
+
+    if not target_id or amount is None:
+        await message.answer(
+            "❌ Формат:\n"
+            "<code>/give_money 12345678 500</code>\n"
+            "или ответом на сообщение:\n"
+            "<code>/give_money 500</code>"
+        )
+        return
+
+    register_user(target_id)
+    user = get_user(target_id)
+    if not user:
+        await message.answer("❌ Пользователь не найден.")
+        return
+
+    new_balance = user["balance"] + amount
+    update_user(target_id, balance=new_balance)
+    await message.answer(
+        f"✅ Начислено <b>{amount}</b> монет пользователю <code>{target_id}</code>\n"
+        f"Новый баланс: <b>{new_balance}</b>"
+    )
+
+
+@dp.message(Command("give_exp"))
+async def cmd_give_exp(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+
+    parts     = message.text.strip().split()
+    target_id, amount = await _resolve_target(message, parts)
+
+    if not target_id or amount is None:
+        await message.answer(
+            "❌ Формат:\n"
+            "<code>/give_exp 12345678 500</code>\n"
+            "или ответом: <code>/give_exp 500</code>"
+        )
+        return
+
+    register_user(target_id)
+    user = get_user(target_id)
+    if not user:
+        await message.answer("❌ Пользователь не найден.")
+        return
+
+    new_exp = user["exp"] + amount
+    update_user(target_id, exp=new_exp)
+    user, level_msgs = auto_level_up({**user, "exp": new_exp})
+    level_block = "\n".join(level_msgs)
+    await message.answer(
+        f"✅ Начислено <b>{amount}</b> XP пользователю <code>{target_id}</code>"
+        + (f"\n{level_block}" if level_block else "")
+    )
+
+
+@dp.message(Command("set_stat"))
+async def cmd_set_stat(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+
+    parts = message.text.strip().split()
+    # /set_stat 12345678 agility 10  ИЛИ reply + /set_stat agility 10
+    target_id = None
+    stat_name = None
+    value     = None
+
+    VALID_STATS = {
+        "agility", "endurance", "charisma", "intellect", "luck",
+        "level", "balance",
+        "communication_level", "driving_level", "charisma_level",
+        "organization_level", "management_level",
+    }
+
+    if message.reply_to_message and message.reply_to_message.from_user:
+        target_id = message.reply_to_message.from_user.id
+        if len(parts) >= 3:
+            stat_name = parts[1].lower()
+            if parts[2].lstrip("-").isdigit():
+                value = int(parts[2])
+    else:
+        if len(parts) >= 4 and parts[1].lstrip("-").isdigit():
+            target_id = int(parts[1])
+            stat_name = parts[2].lower()
+            if parts[3].lstrip("-").isdigit():
+                value = int(parts[3])
+
+    if not target_id or stat_name not in VALID_STATS or value is None:
+        await message.answer(
+            "❌ Формат:\n"
+            "<code>/set_stat 12345678 agility 10</code>\n"
+            "или ответом: <code>/set_stat agility 10</code>\n\n"
+            f"Доступные статы: {', '.join(sorted(VALID_STATS))}"
+        )
+        return
+
+    register_user(target_id)
+    user = get_user(target_id)
+    if not user:
+        await message.answer("❌ Пользователь не найден.")
+        return
+
+    update_user(target_id, **{stat_name: value})
+    await message.answer(
+        f"✅ Стат <b>{stat_name}</b> пользователя <code>{target_id}</code> "
+        f"установлен в <b>{value}</b>"
+    )
 # =====================================================================
 # ТОЧКА ВХОДА
 # =====================================================================
