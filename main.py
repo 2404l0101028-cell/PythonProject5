@@ -936,6 +936,7 @@ def register_user(user_id: int, username: str = ""):
                    VALUES (%s, %s, %s)
                    ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username""",
                 (user_id, luck, username)
+                # luck не трогается при конфликте — только username обновляется
             )
             conn.commit()
 
@@ -1018,12 +1019,19 @@ def auto_level_up(user: dict) -> tuple[dict, list[str]]:
         new_cha  = user["charisma"]  + gains["charisma"]
         new_int  = user["intellect"] + gains["intellect"]
 
+        new_max_hp = 100 + new_end * 10
+        new_max_energy = 100 + new_int * 10
+        new_hp = min(user.get("hp", 100) + (new_end - user["endurance"]) * 10, new_max_hp)
+        new_energy = min(user.get("energy", 100) + (new_int - user["intellect"]) * 10, new_max_energy)
+
         update_user(
             user["user_id"],
             level=new_level, exp=new_exp,
             agility=new_agi, endurance=new_end,
             charisma=new_cha, intellect=new_int,
+            hp=new_hp, energy=new_energy,
         )
+        user = {**user, "hp": new_hp, "energy": new_energy}
         user = {
             **user,
             "level": new_level, "exp": new_exp,
@@ -1656,6 +1664,9 @@ def do_stock_bet(user: dict, outcome_input: str, bet: int) -> tuple[bool, str]:
         update_user(user["user_id"], balance=new_balance)
         change_reputation(user["user_id"], +1)
         update_quest_progress(user["user_id"], "stock")
+        updated = get_user(user["user_id"])
+        if updated:
+            check_and_grant_achievements(updated)
         phrase = random.choice(STOCK_WIN_PHRASES)
         text = (
             f"📊 <b>Рынок пришёл в движение!</b>\n"
@@ -2177,7 +2188,7 @@ async def bunker_join_button(callback: CallbackQuery, callback_data: BunkerJoinC
 
     game.players[uid] = {"name": name, "card": {}}
     await callback.answer(f"✅ Ты в игре, {name}!", show_alert=True)
-    await callback.message.answer(
+    await bot.send_message(chat_id,
         f"✅ <b>{name}</b> вошёл в бункер! "
         f"Всего игроков: <b>{len(game.players)}</b>"
     )
@@ -2863,6 +2874,9 @@ async def poker_or_bunker_join(message: Message):
             await message.answer("❌ Стол заполнен (максимум 6 игроков).")
             return
         user_data = get_user_safe(uid)
+        if not user_data:
+            await message.answer("❌ Зарегистрируйся через /start")
+            return
         if user_data["balance"] < POKER_BIG_BLIND:
             await message.answer(
                 f"❌ {name}, недостаточно монет для игры. "
@@ -2934,8 +2948,9 @@ async def _poker_begin(message: Message, game: PokerGame):
         for p in game.players.values()
     )
     dealer_name = game.players[game.order[game.dealer_idx]]["name"]
-    sb_name = game.players[game.order[1 % len(game.order)]]["name"]
-    bb_name = game.players[game.order[2 % len(game.order)]]["name"]
+    n = len(game.order)
+    sb_name = game.players[game.order[1 % n]]["name"]
+    bb_name = game.players[game.order[2 % n]]["name"] if n > 2 else sb_name
 
     msg = (
         f"🃏 <b>ПОКЕР НАЧАЛСЯ!</b>\n\n"
@@ -3004,8 +3019,12 @@ async def _poker_next_turn(message: Message, game: PokerGame):
         if game.phase == "river":
             await _poker_showdown(message, game)
         else:
-            game.advance_phase()
-            await _poker_next_turn(message, game)
+            while game.phase not in ("showdown", "river"):
+                new_p = game.advance_phase()
+                if new_p == "showdown" or not game.players_who_can_act():
+                    await _poker_showdown(message, game)
+                    return
+            await _poker_showdown(message, game)
         return
 
     p    = game.players[current_uid]
@@ -3394,9 +3413,12 @@ async def btn_jobs_private(message: Message):
 
 @dp.message(F.text == "🛠 Работа", F.chat.type == "private")
 async def btn_work_private(message: Message):
-    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
-    _, text = do_work(user)
-    await message.answer(text)
+    try:
+        user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
+        _, text = do_work(user)
+        await message.answer(text)
+    except Exception as e:
+        await message.answer(f"❌ Ошибка при работе. Попробуй ещё раз.\n<code>{e}</code>")
 
 @dp.message(F.text == "🏋️ Тренировки", F.chat.type == "private")
 async def btn_training_private(message: Message):
@@ -3452,9 +3474,17 @@ async def txt_jobs_group(message: Message):
 @dp.message(F.chat.type.in_({"group", "supergroup"}),
             F.text.func(lambda t: t and _is(t, "работа", "работать", "work")))
 async def txt_work_group(message: Message):
-    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
-    _, text = do_work(user)
-    await message.answer(f"{message.from_user.mention_html()}\n{text}")
+    try:
+        user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
+        _, text = do_work(user)
+        full_text = f"{message.from_user.mention_html()}\n{text}"
+        if len(full_text) > 4000:
+            await message.answer(full_text[:4000])
+            await message.answer(full_text[4000:])
+        else:
+            await message.answer(full_text)
+    except Exception as e:
+        await message.answer(f"❌ Ошибка. Попробуй ещё раз.\n<code>{e}</code>")
 
 @dp.message(F.chat.type.in_({"group", "supergroup"}),
             F.text.func(lambda t: t and _is(t, "тренировки", "тренировка", "train")))
@@ -3601,18 +3631,19 @@ async def callback_upgrade_skill(callback: CallbackQuery):
     skill_key = callback.data.split(":")[1]
     user      = get_user_safe(callback.from_user.id)
     success, text = do_upgrade_skill(user, skill_key)
-    await callback.answer(text[:200], show_alert=not success)
+    await callback.answer()
+    await callback.message.answer(text)
     if success:
         updated = get_user(callback.from_user.id)
         new_text, new_kb = build_skills_text(updated)
         await callback.message.edit_text(new_text, reply_markup=new_kb)
 
-
 @dp.callback_query(ShopCallback.filter())
 async def callback_shop_buy(callback: CallbackQuery, callback_data: ShopCallback):
     user    = get_user_safe(callback.from_user.id)
     success, text = do_buy_item(user, callback_data.item_key)
-    await callback.answer(text[:200], show_alert=True)
+    await callback.answer()
+    await callback.message.answer(text)
     if success:
         updated = get_user(callback.from_user.id)
         await callback.message.edit_text(
@@ -3626,7 +3657,8 @@ async def callback_use_consumable(callback: CallbackQuery):
     item_key = callback.data.split(":")[1]
     user     = get_user_safe(callback.from_user.id)
     success, text = do_use_consumable(user, item_key)
-    await callback.answer(text[:200], show_alert=True)
+    await callback.answer()
+    await callback.message.answer(text)
     if success:
         updated = get_user(callback.from_user.id)
         await callback.message.edit_text(
@@ -3639,14 +3671,14 @@ async def callback_use_consumable(callback: CallbackQuery):
 async def callback_train(callback: CallbackQuery, callback_data: TrainCallback):
     user    = get_user_safe(callback.from_user.id)
     success, text = do_train(user, callback_data.stat)
-    await callback.answer(text[:200], show_alert=True)
+    await callback.answer()
+    await callback.message.answer(text)
     if success:
         updated = get_user(callback.from_user.id)
         await callback.message.edit_text(
             build_training_text(updated),
             reply_markup=get_training_keyboard()
         )
-
 # =====================================================================
 # ТОП ИГРОКОВ
 # =====================================================================
@@ -4028,12 +4060,14 @@ async def duel_accept(callback: CallbackQuery):
     bet    = duel["bet"]
 
     challenger = get_user(c_id)
-    target     = get_user(t_id)
-
-    # Проверяем балансы ещё раз
+    target = get_user(t_id)
+    if not challenger or not target:
+        del active_duels[chat_id]
+        await bot.send_message(chat_id, "❌ Ошибка: игрок не найден в базе.")
+        return
     if challenger["balance"] < bet or target["balance"] < bet:
         del active_duels[chat_id]
-        await callback.message.answer("❌ У одного из игроков не хватает монет. Дуэль отменена.")
+        await bot.send_message(chat_id, "❌ У одного из игроков не хватает монет. Дуэль отменена.")
         return
 
     # Считаем силу — характеристики + рандом
@@ -4051,7 +4085,7 @@ async def duel_accept(callback: CallbackQuery):
     c_power, c_roll = calc_power(challenger)
     t_power, t_roll = calc_power(target)
 
-    await callback.message.answer(
+    await bot.send_message(chat_id,
         f"⚔️ <b>ДУЭЛЬ НАЧАЛАСЬ!</b>\n\n"
         f"🗡 {c_name}\n"
         f"   Сила: {c_power} (стат: {c_power - c_roll} + 🎲{c_roll})\n\n"
@@ -4065,7 +4099,7 @@ async def duel_accept(callback: CallbackQuery):
     if c_power == t_power:
         # Ничья
         del active_duels[chat_id]
-        await callback.message.answer(
+        await bot.send_message(chat_id,
             f"🤝 <b>НИЧЬЯ!</b>\n\n"
             f"Силы равны ({c_power} vs {t_power}).\n"
             f"Монеты остаются у каждого."
@@ -4095,7 +4129,7 @@ async def duel_accept(callback: CallbackQuery):
     check_and_grant_achievements(updated_winner)
     update_quest_progress(winner_id, "duel_win")
 
-    await callback.message.answer(
+    await bot.send_message(chat_id,
         f"🏆 <b>ПОБЕДИТЕЛЬ — {winner_name}!</b>\n\n"
         f"⚔️ {c_power} vs {t_power}\n\n"
         f"💰 {winner_name} получает <b>+{bet}</b> монет → {new_winner_bal}\n"
@@ -4120,7 +4154,7 @@ async def duel_decline(callback: CallbackQuery):
 
     del active_duels[chat_id]
     await callback.answer()
-    await callback.message.answer(
+    await bot.send_message(chat_id,
         f"🏳️ <b>{duel['target_name']}</b> отказался от дуэли. Трус! 🐔"
     )
 # =====================================================================
@@ -4426,6 +4460,9 @@ async def callback_gacha_pull(callback: CallbackQuery):
 
     pet_key, pet, is_duplicate = gacha_pull(user)
     updated = get_user(uid)
+    if not updated:
+        await callback.answer("❌ Ошибка получения данных. Попробуй ещё раз.", show_alert=True)
+        return
     new_bonus = updated.get("pet_bonus", pet["base_bonus"])
 
     if is_duplicate:
@@ -4514,8 +4551,9 @@ def get_rep_discount(rep: int) -> int:
     return discount
 
 def change_reputation(user_id: int, amount: int) -> tuple[int, int]:
-    """Меняет репутацию. Возвращает (старая, новая)."""
-    user    = get_user(user_id)
+    user = get_user(user_id)
+    if not user:
+        return 0, 0
     old_rep = user.get("reputation", 0)
     new_rep = max(REP_MIN, min(REP_MAX, old_rep + amount))
     update_user(user_id, reputation=new_rep)
@@ -4662,7 +4700,7 @@ async def dice_challenge(message: Message):
         await asyncio.sleep(60)
         if chat_id in active_dice and not active_dice[chat_id]["accepted"]:
             del active_dice[chat_id]
-            await message.answer(f"⏰ {target_name} не ответил. Игра отменена.")
+            await bot.send_message(chat_id, f"⏰ {target_name} не ответил. Игра отменена.")
     asyncio.create_task(auto_cancel())
 
 
@@ -4695,7 +4733,7 @@ async def dice_accept(callback: CallbackQuery):
 
     if challenger["balance"] < bet or target["balance"] < bet:
         del active_dice[chat_id]
-        await callback.message.answer("❌ У одного из игроков не хватает монет. Игра отменена.")
+        await bot.send_message(chat_id,"❌ У одного из игроков не хватает монет. Игра отменена.")
         return
 
     # Бросаем кубики
@@ -4704,7 +4742,7 @@ async def dice_accept(callback: CallbackQuery):
     c_sum  = sum(c_dice)
     t_sum  = sum(t_dice)
 
-    await callback.message.answer(
+    await bot.send_message(chat_id,
         f"🎲 <b>БРОСАЕМ КОСТИ!</b>\n\n"
         f"🎯 {c_name}: [{c_dice[0]}] + [{c_dice[1]}] = <b>{c_sum}</b>\n"
         f"🎯 {t_name}: [{t_dice[0]}] + [{t_dice[1]}] = <b>{t_sum}</b>"
@@ -4715,7 +4753,7 @@ async def dice_accept(callback: CallbackQuery):
     del active_dice[chat_id]
 
     if c_sum == t_sum:
-        await callback.message.answer(
+        await bot.send_message(chat_id,
             f"🤝 <b>НИЧЬЯ!</b> Оба выбросили {c_sum}.\n"
             f"Монеты остаются у каждого."
         )
@@ -4740,7 +4778,7 @@ async def dice_accept(callback: CallbackQuery):
     change_reputation(winner_id, +2)
     change_reputation(loser_id,  -1)
 
-    await callback.message.answer(
+    await bot.send_message(chat_id,
         f"🏆 <b>ПОБЕДИТЕЛЬ — {winner_name}!</b>\n\n"
         f"💰 +{bet} монет → баланс: {new_winner_bal}\n"
         f"💸 -{bet} монет → баланс: {new_loser_bal}"
@@ -4764,7 +4802,7 @@ async def dice_decline(callback: CallbackQuery):
 
     del active_dice[chat_id]
     await callback.answer()
-    await callback.message.answer(
+    await bot.send_message(chat_id,
         f"🏳️ <b>{dice['target_name']}</b> отказался. Трус! 🐔"
     )
 
