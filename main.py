@@ -1,8 +1,9 @@
 import asyncio
 import random
-import sqlite3
 import time
 import os
+import psycopg2
+import psycopg2.extras
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import (
@@ -19,12 +20,12 @@ from itertools import combinations
 # =====================================================================
 # НАСТРОЙКИ БОТА
 # =====================================================================
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-DB_PATH = "game.db"
+BOT_TOKEN    = os.getenv("BOT_TOKEN")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-WORK_COOLDOWN     = 60    # кулдаун работы в секундах
-WORK_ENERGY_COST  = 15    # расход энергии за работу
-TRAIN_ENERGY_COST = 50    # расход энергии за тренировку
+WORK_COOLDOWN     = 60
+WORK_ENERGY_COST  = 15
+TRAIN_ENERGY_COST = 50
 
 # =====================================================================
 # ИНИЦИАЛИЗАЦИЯ БОТА И ДИСПЕТЧЕРА
@@ -36,7 +37,13 @@ bot = Bot(
 dp = Dispatcher()
 
 # =====================================================================
-# ФОРМУЛА ОПЫТА (квадратичная, сбалансированная до 100 лвла)
+# ПОДКЛЮЧЕНИЕ К PostgreSQL
+# =====================================================================
+def get_conn():
+    return psycopg2.connect(DATABASE_URL)
+
+# =====================================================================
+# ФОРМУЛА ОПЫТА
 # =====================================================================
 def xp_needed(level: int) -> int:
     return int(120 * (level ** 1.65))
@@ -165,7 +172,7 @@ JOBS = {
         "special":     "intellect_x10",
     },
 
-    # ══════════ ВЕТКА БАЛАНС (средний XP + монеты) ══════════
+    # ══════════ ВЕТКА БАЛАНС ══════════
     "balance_1": {
         "name":        "Бегун за пирожками в Джал-Маркет на перемене",
         "branch":      "balance",
@@ -278,7 +285,7 @@ JOBS = {
         "evolves_to":  None,
     },
 
-    # ══════════ ВЕТКА ДЕНЬГИ (уклон в монеты) ══════════
+    # ══════════ ВЕТКА ДЕНЬГИ ══════════
     "money_1": {
         "name":        "Помощник на раздаче Чорбо в столовой",
         "branch":      "money",
@@ -464,7 +471,7 @@ class BunkerVoteCallback(CallbackData, prefix="bunker_vote"):
     chat_id: int
 
 # =====================================================================
-# МАГАЗИН — ПРЕДМЕТЫ ДЛЯ НАВЫКОВ/ПРОФЕССИЙ
+# МАГАЗИН
 # =====================================================================
 SHOP_ITEMS = {
     "scooter": {
@@ -632,112 +639,84 @@ SKILL_CONFIG = {
 }
 
 # =====================================================================
-# БАЗА ДАННЫХ
+# БАЗА ДАННЫХ — PostgreSQL
 # =====================================================================
 def init_db():
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id               INTEGER PRIMARY KEY,
-                balance               INTEGER DEFAULT 0,
-                level                 INTEGER DEFAULT 1,
-                exp                   INTEGER DEFAULT 0,
-                job                   TEXT    DEFAULT 'Безработный',
-                last_work_time        INTEGER DEFAULT 0,
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id               BIGINT PRIMARY KEY,
+                    balance               INTEGER DEFAULT 0,
+                    level                 INTEGER DEFAULT 1,
+                    exp                   INTEGER DEFAULT 0,
+                    job                   TEXT    DEFAULT 'Безработный',
+                    last_work_time        INTEGER DEFAULT 0,
 
-                agility               INTEGER DEFAULT 1,
-                endurance             INTEGER DEFAULT 1,
-                charisma              INTEGER DEFAULT 1,
-                intellect             INTEGER DEFAULT 1,
-                luck                  INTEGER DEFAULT 1,
+                    agility               INTEGER DEFAULT 1,
+                    endurance             INTEGER DEFAULT 1,
+                    charisma              INTEGER DEFAULT 1,
+                    intellect             INTEGER DEFAULT 1,
+                    luck                  INTEGER DEFAULT 1,
 
-                communication_level   INTEGER DEFAULT 1,
-                driving_level         INTEGER DEFAULT 0,
-                charisma_level        INTEGER DEFAULT 0,
-                organization_level    INTEGER DEFAULT 0,
-                management_level      INTEGER DEFAULT 0,
+                    communication_level   INTEGER DEFAULT 1,
+                    driving_level         INTEGER DEFAULT 0,
+                    charisma_level        INTEGER DEFAULT 0,
+                    organization_level    INTEGER DEFAULT 0,
+                    management_level      INTEGER DEFAULT 0,
 
-                job_rank              INTEGER DEFAULT 1,
+                    job_rank              INTEGER DEFAULT 1,
 
-                has_scooter           INTEGER DEFAULT 0,
-                has_shaker            INTEGER DEFAULT 0,
-                has_laptop            INTEGER DEFAULT 0,
-                has_professor_badge   INTEGER DEFAULT 0,
-                has_logistics_license INTEGER DEFAULT 0,
-                has_import_license    INTEGER DEFAULT 0,
-                has_dean_seal         INTEGER DEFAULT 0,
-                has_business_plan     INTEGER DEFAULT 0,
-                has_franchise_contract INTEGER DEFAULT 0,
+                    has_scooter            INTEGER DEFAULT 0,
+                    has_shaker             INTEGER DEFAULT 0,
+                    has_laptop             INTEGER DEFAULT 0,
+                    has_professor_badge    INTEGER DEFAULT 0,
+                    has_logistics_license  INTEGER DEFAULT 0,
+                    has_import_license     INTEGER DEFAULT 0,
+                    has_dean_seal          INTEGER DEFAULT 0,
+                    has_business_plan      INTEGER DEFAULT 0,
+                    has_franchise_contract INTEGER DEFAULT 0,
 
-                hp                    INTEGER DEFAULT 100,
-                energy                INTEGER DEFAULT 100
-            )
-        """)
-        conn.commit()
+                    hp                    INTEGER DEFAULT 100,
+                    energy                INTEGER DEFAULT 100,
 
-        migrations = [
-            "ALTER TABLE users ADD COLUMN agility               INTEGER DEFAULT 1",
-            "ALTER TABLE users ADD COLUMN endurance             INTEGER DEFAULT 1",
-            "ALTER TABLE users ADD COLUMN charisma              INTEGER DEFAULT 1",
-            "ALTER TABLE users ADD COLUMN intellect             INTEGER DEFAULT 1",
-            "ALTER TABLE users ADD COLUMN luck                  INTEGER DEFAULT 1",
-            "ALTER TABLE users ADD COLUMN communication_level   INTEGER DEFAULT 1",
-            "ALTER TABLE users ADD COLUMN driving_level         INTEGER DEFAULT 0",
-            "ALTER TABLE users ADD COLUMN charisma_level        INTEGER DEFAULT 0",
-            "ALTER TABLE users ADD COLUMN organization_level    INTEGER DEFAULT 0",
-            "ALTER TABLE users ADD COLUMN management_level      INTEGER DEFAULT 0",
-            "ALTER TABLE users ADD COLUMN job_rank              INTEGER DEFAULT 1",
-            "ALTER TABLE users ADD COLUMN has_scooter           INTEGER DEFAULT 0",
-            "ALTER TABLE users ADD COLUMN has_shaker            INTEGER DEFAULT 0",
-            "ALTER TABLE users ADD COLUMN has_laptop            INTEGER DEFAULT 0",
-            "ALTER TABLE users ADD COLUMN has_professor_badge   INTEGER DEFAULT 0",
-            "ALTER TABLE users ADD COLUMN has_logistics_license INTEGER DEFAULT 0",
-            "ALTER TABLE users ADD COLUMN has_import_license    INTEGER DEFAULT 0",
-            "ALTER TABLE users ADD COLUMN has_dean_seal         INTEGER DEFAULT 0",
-            "ALTER TABLE users ADD COLUMN has_business_plan     INTEGER DEFAULT 0",
-            "ALTER TABLE users ADD COLUMN has_franchise_contract INTEGER DEFAULT 0",
-            "ALTER TABLE users ADD COLUMN hp                    INTEGER DEFAULT 100",
-            "ALTER TABLE users ADD COLUMN energy                INTEGER DEFAULT 100",
-            "ALTER TABLE users ADD COLUMN has_psychology_book   INTEGER DEFAULT 0",
-            "ALTER TABLE users ADD COLUMN has_driving_license   INTEGER DEFAULT 0",
-            "ALTER TABLE users ADD COLUMN last_regen_time       INTEGER DEFAULT 0",
-            "ALTER TABLE users ADD COLUMN has_suit              INTEGER DEFAULT 0",
-        ]
-        for sql in migrations:
-            try:
-                conn.execute(sql)
-            except sqlite3.OperationalError:
-                pass
-        conn.commit()
+                    has_psychology_book   INTEGER DEFAULT 0,
+                    has_driving_license   INTEGER DEFAULT 0,
+                    last_regen_time       INTEGER DEFAULT 0,
+                    has_suit              INTEGER DEFAULT 0
+                )
+            """)
+            conn.commit()
 
 
 def register_user(user_id: int):
     luck = random.randint(1, 10)
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO users (user_id, luck) VALUES (?, ?)",
-            (user_id, luck)
-        )
-        conn.commit()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO users (user_id, luck) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                (user_id, luck)
+            )
+            conn.commit()
 
 
 def get_user(user_id: int) -> dict | None:
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            "SELECT * FROM users WHERE user_id = ?", (user_id,)
-        ).fetchone()
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM users WHERE user_id = %s", (user_id,))
+            row = cur.fetchone()
     return dict(row) if row else None
 
 
 def update_user(user_id: int, **kwargs):
     if not kwargs:
         return
-    fields = ", ".join(f"{k} = ?" for k in kwargs)
+    fields = ", ".join(f"{k} = %s" for k in kwargs)
     values = list(kwargs.values()) + [user_id]
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(f"UPDATE users SET {fields} WHERE user_id = ?", values)
-        conn.commit()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"UPDATE users SET {fields} WHERE user_id = %s", values)
+            conn.commit()
 
 # =====================================================================
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -902,6 +881,7 @@ def build_jobs_text(user: dict) -> str:
                 f"   <i>{d['description']}</i>"
             )
         return "\n".join(lines)
+
     job     = JOBS[job_key]
     rank    = user.get("job_rank", 1)
     bonus   = (rank - 1) * 10
@@ -963,13 +943,14 @@ def get_jobs_keyboard(user: dict) -> InlineKeyboardMarkup | None:
             )
         builder.adjust(1)
         return builder.as_markup()
+
     job = JOBS[job_key]
     next_key = job.get("evolves_to")
     if next_key:
         can, _ = check_upgrade_conditions(user)
         if can:
             builder.button(
-                text=f"🚀 Повысить грейд",
+                text="🚀 Повысить грейд",
                 callback_data=UpgradeJobCallback(job_key=next_key).pack()
             )
             builder.adjust(1)
@@ -1107,7 +1088,7 @@ def do_upgrade_skill(user: dict, skill_key: str) -> tuple[bool, str]:
 
     unlock = cfg.get("unlock_item")
     if unlock and not user.get(unlock):
-        return False, f"❌ Сначала купи нужный предмет в Магазине."
+        return False, "❌ Сначала купи нужный предмет в Магазине."
 
     val  = user.get(skill_key, 0)
     cost = max(cfg["cost_base"], val * cfg["cost_base"])
@@ -1350,7 +1331,7 @@ def get_main_menu() -> ReplyKeyboardMarkup:
     )
 
 # =====================================================================
-# БИРЖА — СИМУЛЯТОР АКЦИЙ
+# БИРЖА
 # =====================================================================
 STOCK_MIN_BET = 100
 STOCK_OUTCOMES = ["ап"] * 18 + ["давн"] * 18 + ["нейтрал"] * 2
@@ -1428,12 +1409,8 @@ def do_stock_bet(user: dict, outcome_input: str, bet: int) -> tuple[bool, str]:
 
 
 # =====================================================================
-# ████████████████████████████████████████████████████████████████████
-#                         МОДУЛЬ «БУНКЕР»
-# ████████████████████████████████████████████████████████████████████
+# МОДУЛЬ «БУНКЕР»
 # =====================================================================
-
-# ── Пулы контента для режима ОБЫЧНЫЙ ─────────────────────────────────
 BUNKER_CLASSIC = {
     "disasters": [
         "☢️ <b>Ядерная война</b>\n"
@@ -1507,7 +1484,6 @@ BUNKER_CLASSIC = {
     ],
 }
 
-# ── Пулы контента для режима МАНАС ───────────────────────────────────
 BUNKER_MANAS = {
     "disaster": (
         "📋 <b>КАТАСТРОФА: Тотальная проверка ректората!</b>\n\n"
@@ -1595,40 +1571,28 @@ BUNKER_MANAS = {
     ],
 }
 
-# ── Хранилище активных игр (в памяти) ────────────────────────────────
-# Структура: { chat_id: BunkerGame }
 bunker_games: dict[int, "BunkerGame"] = {}
-
-BUNKER_REGISTRATION_SECONDS = 120  # 2 минуты на регистрацию
+BUNKER_REGISTRATION_SECONDS = 120
 
 class BunkerGame:
-    """Состояние одной игры «Бункер» в чате."""
-
     def __init__(self, chat_id: int, creator_id: int, creator_name: str, mode: str):
         self.chat_id      = chat_id
         self.creator_id   = creator_id
         self.creator_name = creator_name
-        self.mode         = mode          # "classic" | "manas"
+        self.mode         = mode
 
-        # Словарь {user_id: {"name": str, "card": dict}}
         self.players: dict[int, dict] = {}
-
-        self.phase = "registration"       # registration → active → voting → finished
-
+        self.phase = "registration"
         self.disaster_text   = ""
         self.bunker_text     = ""
-        self.survivors_limit = 0          # сколько игроков попадёт в бункер
-
-        # Раунды: список {player_id, revealed: set, votes: dict{voter_id: target_id}}
-        self.round_votes: dict[int, int] = {}   # voter_id → target_id
-        self.eliminated: list[int] = []          # выбывшие user_id
-
+        self.survivors_limit = 0
+        self.round_votes: dict[int, int] = {}
+        self.eliminated: list[int] = []
         self.reg_deadline = int(time.time()) + BUNKER_REGISTRATION_SECONDS
 
-    # ── генерация карты персонажа ──────────────────────────────────
     def _generate_card(self) -> dict:
         if self.mode == "classic":
-            p  = BUNKER_CLASSIC
+            p = BUNKER_CLASSIC
             return {
                 "profession": random.choice(p["professions"]),
                 "baggage":    random.choice(p["baggage"]),
@@ -1637,7 +1601,7 @@ class BunkerGame:
                 "revealed":   set(),
             }
         else:
-            p  = BUNKER_MANAS
+            p = BUNKER_MANAS
             return {
                 "profession": random.choice(p["professions"]),
                 "baggage":    random.choice(p["baggage"]),
@@ -1647,7 +1611,6 @@ class BunkerGame:
                 "revealed":   set(),
             }
 
-    # ── старт (после бункер старт) ────────────────────────────────
     def start_game(self):
         n = len(self.players)
         self.survivors_limit = max(1, n // 2)
@@ -1664,7 +1627,6 @@ class BunkerGame:
 
         self.phase = "active"
 
-    # ── текст карты для игрока (в ЛС) ─────────────────────────────
     def card_text(self, user_id: int) -> str:
         card = self.players[user_id]["card"]
         if self.mode == "classic":
@@ -1692,7 +1654,6 @@ class BunkerGame:
                 f"<code>открыть секрет</code>"
             )
 
-    # ── открыть характеристику ────────────────────────────────────
     def reveal(self, user_id: int, attr_raw: str) -> tuple[bool, str]:
         if user_id not in self.players:
             return False, "Ты не участвуешь в этой игре."
@@ -1702,7 +1663,6 @@ class BunkerGame:
         card = self.players[user_id]["card"]
         name = self.players[user_id]["name"]
 
-        # Маппинг синонимов → ключ карты
         mapping_classic = {
             "профессия": "profession", "профессию": "profession",
             "багаж": "baggage",
@@ -1744,7 +1704,6 @@ class BunkerGame:
         label = label_map.get(key, key)
         return True, f"📢 <b>{name}</b> открывает {label}:\n<b>{card[key]}</b>"
 
-    # ── голосование ───────────────────────────────────────────────
     def vote(self, voter_id: int, target_id: int) -> tuple[bool, str]:
         if voter_id not in self.players:
             return False, "Ты не в игре."
@@ -1757,9 +1716,7 @@ class BunkerGame:
         self.round_votes[voter_id] = target_id
         return True, f"✅ Твой голос принят против <b>{self.players[target_id]['name']}</b>."
 
-    # ── подсчёт голосов и исключение ─────────────────────────────
     def count_votes(self) -> tuple[int | None, str]:
-        """Возвращает (eliminated_user_id, результат_текст)"""
         if not self.round_votes:
             return None, "Никто не проголосовал — голосование не засчитано."
 
@@ -1769,14 +1726,13 @@ class BunkerGame:
 
         max_votes  = max(tally.values())
         candidates = [uid for uid, v in tally.items() if v == max_votes]
-        loser_id   = random.choice(candidates)   # при ничьей — случайно
+        loser_id   = random.choice(candidates)
 
         loser_name = self.players[loser_id]["name"]
         self.eliminated.append(loser_id)
         del self.players[loser_id]
         self.round_votes.clear()
 
-        # Строим таблицу голосов
         lines = ["📊 <b>Итоги голосования:</b>"]
         for uid, cnt in sorted(tally.items(), key=lambda x: -x[1]):
             pname = self.players.get(uid, {}).get("name", f"#{uid}")
@@ -1793,13 +1749,11 @@ class BunkerGame:
                 f"лицом к лицу с катастрофой!"
             )
 
-        # Проверяем, достигнут ли лимит
         if len(self.players) <= self.survivors_limit:
             self.phase = "finished"
 
         return loser_id, "\n".join(lines)
 
-    # ── финальный текст ───────────────────────────────────────────
     def final_text(self) -> str:
         survivors = list(self.players.values())
         names     = [p["name"] for p in survivors]
@@ -1823,15 +1777,12 @@ class BunkerGame:
             )
             title = "🏆 Выжившие в бункере!"
 
-        elim_names = []
-        # Собираем имена выбывших (имён уже нет в players, берём из eliminated_names)
         return (
             f"🎉 <b>ИГРА ОКОНЧЕНА!</b>\n\n"
             f"🔒 <b>{title}</b>\n{names_str}\n\n"
             f"📖 <i>{story}</i>"
         )
 
-    # ── клавиатура для голосования ────────────────────────────────
     def vote_keyboard(self) -> InlineKeyboardMarkup:
         builder = InlineKeyboardBuilder()
         for uid, data in self.players.items():
@@ -1844,7 +1795,6 @@ class BunkerGame:
         builder.adjust(1)
         return builder.as_markup()
 
-    # ── клавиатура «Участвовать» ──────────────────────────────────
     def join_keyboard(self) -> InlineKeyboardMarkup:
         builder = InlineKeyboardBuilder()
         builder.button(
@@ -1855,13 +1805,10 @@ class BunkerGame:
         return builder.as_markup()
 
 
-# ── хелперы ──────────────────────────────────────────────────────────
-def _bunker_active(chat_id: int) -> BunkerGame | None:
+def _bunker_active(chat_id: int) -> "BunkerGame | None":
     g = bunker_games.get(chat_id)
     return g if g and g.phase != "finished" else None
 
-
-# ── хендлеры игры «Бункер» ───────────────────────────────────────────
 
 @dp.message(
     F.chat.type.in_({"group", "supergroup"}),
@@ -1877,13 +1824,11 @@ async def bunker_create(message: Message):
 
     text_lower = message.text.strip().lower()
 
-    # Определяем режим из команды или предлагаем выбор
     if "манас" in text_lower:
         mode = "manas"
     elif "обычный" in text_lower or "классик" in text_lower:
         mode = "classic"
     else:
-        # Показываем инлайн-кнопки выбора режима
         builder = InlineKeyboardBuilder()
         builder.button(
             text="🏫 Режим «Манас» (КТУ-студенты)",
@@ -1918,7 +1863,6 @@ async def bunker_mode_chosen(callback: CallbackQuery, callback_data: BunkerModeC
 
 async def _start_bunker_registration(message: Message, creator_id: int, mode: str):
     chat_id = message.chat.id
-    creator = message.chat.get_member if hasattr(message, "from_user") else None
     creator_name = (
         message.from_user.full_name
         if hasattr(message, "from_user") and message.from_user
@@ -1926,7 +1870,6 @@ async def _start_bunker_registration(message: Message, creator_id: int, mode: st
     )
 
     game = BunkerGame(chat_id, creator_id, creator_name, mode)
-    # Добавляем создателя автоматически
     game.players[creator_id] = {"name": creator_name, "card": {}}
     bunker_games[chat_id] = game
 
@@ -1942,12 +1885,6 @@ async def _start_bunker_registration(message: Message, creator_id: int, mode: st
     )
 
 
-# Регистрация через «+»
-@dp.message(
-    F.chat.type.in_({"group", "supergroup"}),
-    F.text == "+"
-)
-# Регистрация через инлайн-кнопку
 @dp.callback_query(BunkerJoinCallback.filter())
 async def bunker_join_button(callback: CallbackQuery, callback_data: BunkerJoinCallback):
     chat_id = callback_data.chat_id
@@ -1970,7 +1907,6 @@ async def bunker_join_button(callback: CallbackQuery, callback_data: BunkerJoinC
     )
 
 
-# Старт игры
 @dp.message(
     F.chat.type.in_({"group", "supergroup"}),
     F.text.func(lambda t: t and t.strip().lower() in ("бункер старт", "бункер start"))
@@ -1993,10 +1929,9 @@ async def bunker_start(message: Message):
         return
 
     game.start_game()
-    n      = len(game.players)
-    limit  = game.survivors_limit
+    n     = len(game.players)
+    limit = game.survivors_limit
 
-    # Публикуем лор
     await message.answer(
         f"🚨 <b>ИГРА «БУНКЕР» НАЧАЛАСЬ!</b>\n\n"
         f"{game.disaster_text}\n\n"
@@ -2005,7 +1940,6 @@ async def bunker_start(message: Message):
         f"Остальные останутся снаружи..."
     )
 
-    # Рассылаем карты в ЛС
     failed = []
     for uid, data in game.players.items():
         try:
@@ -2029,7 +1963,6 @@ async def bunker_start(message: Message):
     await message.answer(msg)
 
 
-# Открытие характеристики
 @dp.message(
     F.chat.type.in_({"group", "supergroup"}),
     F.text.func(lambda t: t and t.strip().lower().startswith("открыть "))
@@ -2046,7 +1979,6 @@ async def bunker_reveal(message: Message):
         await message.answer(text)
 
 
-# Запуск голосования
 @dp.message(
     F.chat.type.in_({"group", "supergroup"}),
     F.text.func(lambda t: t and t.strip().lower() in ("бункер голосование", "бункер голосовать"))
@@ -2078,7 +2010,6 @@ async def bunker_vote_start(message: Message):
     )
 
 
-# Голосование через инлайн-кнопку
 @dp.callback_query(BunkerVoteCallback.filter())
 async def bunker_vote_button(callback: CallbackQuery, callback_data: BunkerVoteCallback):
     chat_id   = callback_data.chat_id
@@ -2093,14 +2024,12 @@ async def bunker_vote_button(callback: CallbackQuery, callback_data: BunkerVoteC
     await callback.answer(text[:200], show_alert=not ok)
 
     if ok:
-        # Если все проголосовали — автоматически завершаем раунд
         active_voters = set(game.players.keys())
         voted         = set(game.round_votes.keys())
         if active_voters == voted:
             await _finish_vote_round(callback.message, game)
 
 
-# Голосование через текст: «кик @username»
 @dp.message(
     F.chat.type.in_({"group", "supergroup"}),
     F.text.func(lambda t: t and t.strip().lower().startswith("кик "))
@@ -2111,7 +2040,6 @@ async def bunker_kick_text(message: Message):
     if not game or game.phase != "voting":
         return
 
-    # Ищем упоминание пользователя в entities
     target_id   = None
     target_name = None
     if message.entities:
@@ -2129,7 +2057,6 @@ async def bunker_kick_text(message: Message):
                 break
 
     if target_id is None:
-        # Поиск по тексту без «@»
         raw = message.text.strip()[len("кик "):].strip().lower().lstrip("@")
         for uid, data in game.players.items():
             if data["name"].lower() == raw:
@@ -2151,7 +2078,6 @@ async def bunker_kick_text(message: Message):
             await _finish_vote_round(message, game)
 
 
-# Ручное завершение раунда голосования создателем
 @dp.message(
     F.chat.type.in_({"group", "supergroup"}),
     F.text.func(lambda t: t and t.strip().lower() in ("бункер итог", "бункер результат"))
@@ -2169,7 +2095,6 @@ async def bunker_vote_end(message: Message):
 
 
 async def _finish_vote_round(message: Message, game: BunkerGame):
-    """Подводим итоги раунда и выдаём результат."""
     _, result_text = game.count_votes()
     await message.answer(result_text)
 
@@ -2186,7 +2111,6 @@ async def _finish_vote_round(message: Message, game: BunkerGame):
         )
 
 
-# Статус игры
 @dp.message(
     F.chat.type.in_({"group", "supergroup"}),
     F.text.func(lambda t: t and t.strip().lower() in ("бункер статус", "бункер status"))
@@ -2215,7 +2139,6 @@ async def bunker_status(message: Message):
     )
 
 
-# Принудительная отмена игры
 @dp.message(
     F.chat.type.in_({"group", "supergroup"}),
     F.text.func(lambda t: t and t.strip().lower() in ("бункер отмена", "бункер стоп"))
@@ -2234,10 +2157,10 @@ async def bunker_cancel(message: Message):
 
 
 # =====================================================================
-# ТЕКСТ КОМАНДЫ ПОМОЩИ (обновлённый)
+# ТЕКСТ ПОМОЩИ
 # =====================================================================
 HELP_TEXT = (
-    "📋 <b>Все команды игры МанасWorker»</b>\n\n"
+    "📋 <b>Все команды игры «МанасWorker»</b>\n\n"
     "━━━ 👤 Персонаж ━━━\n"
     "<b>Профиль</b> — посмотреть свой профиль, уровень, баланс, характеристики\n\n"
     "━━━ 💼 Работа ━━━\n"
@@ -2255,13 +2178,11 @@ HELP_TEXT = (
     f"  <i>Мин. ставка: {STOCK_MIN_BET} монет | Выигрыш x2 | Шанс нейтрала ~5%</i>\n\n"
     "━━━ 🏗 Бункер ━━━\n"
     "<b>бункер создать</b> — создать игру (выбор режима кнопками)\n"
-    "<b>бункер создать манас</b> — режим «КТУ Манас» (студенческий юмор)\n"
-    "<b>бункер создать обычный</b> — классический режим (апокалипсис)\n"
+    "<b>бункер создать манас</b> — режим «КТУ Манас»\n"
+    "<b>бункер создать обычный</b> — классический режим\n"
     "<b>+</b> — войти в игру во время регистрации\n"
     "<b>бункер старт</b> — начать игру (только создатель)\n"
     "<b>открыть [характеристика]</b> — раскрыть черту персонажа в чате\n"
-    "  <i>Доступно: профессия / багаж / хобби / факт (обычный)</i>\n"
-    "  <i>Доступно: факультет / багаж / характер / хобби / секрет (манас)</i>\n"
     "<b>бункер голосование</b> — запустить голосование (создатель)\n"
     "<b>кик @username</b> — проголосовать против игрока\n"
     "<b>бункер итог</b> — подвести итоги голосования (создатель)\n"
@@ -2271,11 +2192,7 @@ HELP_TEXT = (
     "<b>покер создать</b> — создать стол (макс. 6 игроков)\n"
     "<b>+</b> — сесть за стол во время регистрации\n"
     "<b>покер старт</b> — начать игру (создатель)\n"
-    "<b>чек</b> — пропустить ход (если нет ставки)\n"
-    "<b>колл</b> — уравнять ставку\n"
-    "<b>рейз [сумма]</b> — повысить ставку\n"
-    "<b>фолд</b> — сбросить карты\n"
-    "<b>ва-банк</b> — поставить всё\n"
+    "<b>чек</b> / <b>колл</b> / <b>рейз [сумма]</b> / <b>фолд</b> / <b>ва-банк</b>\n"
     "<b>покер стол</b> — показать состояние стола\n"
     "<b>покер отмена</b> — отменить игру (создатель)\n\n"
     "━━━ 💸 Переводы ━━━\n"
@@ -2287,11 +2204,8 @@ HELP_TEXT = (
 )
 
 # =====================================================================
-# ████████████████████████████████████████████████████████████████████
-#                      МОДУЛЬ «ТЕХАССКИЙ ПОКЕР»
-# ████████████████████████████████████████████████████████████████████
+# МОДУЛЬ «ТЕХАССКИЙ ПОКЕР»
 # =====================================================================
-
 POKER_SMALL_BLIND  = 10
 POKER_BIG_BLIND    = 20
 POKER_MAX_PLAYERS  = 6
@@ -2301,17 +2215,14 @@ POKER_TURN_SECONDS = 60
 
 RANKS = ['2','3','4','5','6','7','8','9','10','J','Q','K','A']
 SUITS = ['♥️','♦️','♣️','♠️']
-
 RANK_VALUE = {r: i for i, r in enumerate(RANKS, 2)}
-
 HAND_NAMES = [
     'Старшая карта', 'Пара', 'Две пары', 'Тройка',
     'Стрит', 'Флеш', 'Фулл-хаус', 'Каре',
     'Стрит-флеш', 'Роял-флеш'
 ]
 
-# Хранилище активных покер-игр
-poker_games: dict[int, 'PokerGame'] = {}
+poker_games: dict[int, "PokerGame"] = {}
 
 
 def _new_deck() -> list[str]:
@@ -2334,26 +2245,23 @@ def _card_suit(card: str) -> str:
     return ''
 
 
-# ── Оценка покерной руки из 5 карт ───────────────────────────────────
 def _hand_rank_5(cards: list[str]) -> tuple:
     ranks  = sorted([_card_rank(c) for c in cards], reverse=True)
     suits  = [_card_suit(c) for c in cards]
-    is_flush  = len(set(suits)) == 1
+    is_flush    = len(set(suits)) == 1
     is_straight = (ranks == list(range(ranks[0], ranks[0] - 5, -1))) or \
-                  (sorted(ranks) == [2, 3, 4, 5, 14])  # колесо A-2-3-4-5
+                  (sorted(ranks) == [2, 3, 4, 5, 14])
 
     if is_straight and sorted(ranks) == [2, 3, 4, 5, 14]:
-        ranks = [5, 4, 3, 2, 1]  # колесо
+        ranks = [5, 4, 3, 2, 1]
 
     from collections import Counter
-    cnt = Counter(ranks)
+    cnt    = Counter(ranks)
     groups = sorted(cnt.values(), reverse=True)
     vals   = sorted(cnt.keys(), key=lambda x: (cnt[x], x), reverse=True)
 
     if is_flush and is_straight:
-        if ranks[0] == 14:
-            return (9, ranks)
-        return (8, ranks)
+        return (9, ranks) if ranks[0] == 14 else (8, ranks)
     if groups[0] == 4:
         return (7, vals)
     if groups[:2] == [3, 2]:
@@ -2372,7 +2280,6 @@ def _hand_rank_5(cards: list[str]) -> tuple:
 
 
 def _best_hand(cards: list[str]) -> tuple:
-    """Лучшая рука из 7 карт (2 карманных + 5 общих)."""
     best = None
     best_combo = []
     for combo in combinations(cards, 5):
@@ -2383,56 +2290,29 @@ def _best_hand(cards: list[str]) -> tuple:
     return best, best_combo
 
 
-# ── Класс игры ────────────────────────────────────────────────────────
 class PokerGame:
     def __init__(self, chat_id: int, creator_id: int, creator_name: str):
         self.chat_id      = chat_id
         self.creator_id   = creator_id
         self.creator_name = creator_name
-
-        # {user_id: {"name": str, "hole": [card,card], "balance": int,
-        #            "bet": int, "total_bet": int, "folded": bool, "allin": bool}}
         self.players: dict[int, dict] = {}
-        self.order:   list[int] = []      # порядок ходов
-
-        self.phase = "registration"       # registration → preflop → flop → turn → river → showdown
-
+        self.order:   list[int] = []
+        self.phase = "registration"
         self.deck:        list[str] = []
-        self.community:   list[str] = []  # общие карты
+        self.community:   list[str] = []
         self.pot:         int       = 0
-        self.current_bet: int       = 0   # максимальная текущая ставка в раунде
+        self.current_bet: int       = 0
         self.dealer_idx:  int       = 0
-        self.current_idx: int       = 0   # индекс в self.order
-        self.round_done:  set[int]  = set()  # кто уже походил в этом круге
-
+        self.current_idx: int       = 0
+        self.round_done:  set[int]  = set()
         self.reg_deadline = int(time.time()) + POKER_REG_SECONDS
         self.turn_task: asyncio.Task | None = None
 
-    # ── Утилиты ──────────────────────────────────────────────────────
-
     def active_players(self) -> list[int]:
-        return [uid for uid in self.order
-                if not self.players[uid]["folded"]]
+        return [uid for uid in self.order if not self.players[uid]["folded"]]
 
     def players_who_can_act(self) -> list[int]:
-        return [uid for uid in self.active_players()
-                if not self.players[uid]["allin"]]
-
-    def current_player_id(self) -> int | None:
-        ap = self.active_players()
-        if not ap:
-            return None
-        return self.order[self.current_idx % len(self.order)] \
-            if self.order else None
-
-    def next_active_idx(self, start: int) -> int:
-        n = len(self.order)
-        for i in range(1, n + 1):
-            idx = (start + i) % n
-            uid = self.order[idx]
-            if not self.players[uid]["folded"] and not self.players[uid]["allin"]:
-                return idx
-        return start
+        return [uid for uid in self.active_players() if not self.players[uid]["allin"]]
 
     def table_text(self) -> str:
         community_str = " ".join(self.community) if self.community else "—"
@@ -2446,7 +2326,6 @@ class PokerGame:
         dealer_id = self.order[self.dealer_idx] if self.order else None
         for uid in self.order:
             p = self.players[uid]
-            status = ""
             if p["folded"]:
                 status = "❌ Фолд"
             elif p["allin"]:
@@ -2457,15 +2336,12 @@ class PokerGame:
             lines.append(f"  • {p['name']}{dealer_mark} — {status}")
         return "\n".join(lines)
 
-    # ── Старт ────────────────────────────────────────────────────────
-
     def start_game(self):
         uids = list(self.players.keys())
         random.shuffle(uids)
         self.order = uids
         self.deck  = _new_deck()
 
-        # Раздаём по 2 карты
         for uid in self.order:
             self.players[uid]["hole"] = [self.deck.pop(), self.deck.pop()]
             self.players[uid]["bet"]       = 0
@@ -2473,7 +2349,6 @@ class PokerGame:
             self.players[uid]["folded"]    = False
             self.players[uid]["allin"]     = False
 
-        # Блайнды
         n = len(self.order)
         self.dealer_idx = 0
         sb_idx = 1 % n
@@ -2482,10 +2357,7 @@ class PokerGame:
         self._post_blind(self.order[sb_idx], POKER_SMALL_BLIND)
         self._post_blind(self.order[bb_idx], POKER_BIG_BLIND)
         self.current_bet = POKER_BIG_BLIND
-
-        # Первый ход — игрок после BB
         self.current_idx = (bb_idx + 1) % n
-        # При 2 игроках дилер=SB, первый ход у дилера
         if n == 2:
             self.current_idx = sb_idx
 
@@ -2503,8 +2375,6 @@ class PokerGame:
             p["allin"] = True
         update_user(uid, balance=p["balance"])
 
-    # ── Действия игрока ───────────────────────────────────────────────
-
     def action_fold(self, uid: int) -> str:
         self.players[uid]["folded"] = True
         self.round_done.add(uid)
@@ -2521,7 +2391,7 @@ class PokerGame:
         return True, f"✅ {p['name']} — Чек."
 
     def action_call(self, uid: int) -> str:
-        p   = self.players[uid]
+        p    = self.players[uid]
         need = self.current_bet - p["bet"]
         actual = min(need, p["balance"])
         p["balance"]   -= actual
@@ -2541,9 +2411,7 @@ class PokerGame:
         if need <= 0:
             return False, "❌ Некорректная сумма рейза."
         if need > p["balance"]:
-            return False, (
-                f"❌ Недостаточно монет. Нужно {need}, есть {p['balance']}."
-            )
+            return False, f"❌ Недостаточно монет. Нужно {need}, есть {p['balance']}."
         p["balance"]   -= need
         p["bet"]       += need
         p["total_bet"] += need
@@ -2552,11 +2420,8 @@ class PokerGame:
         if p["balance"] == 0:
             p["allin"] = True
         update_user(uid, balance=p["balance"])
-        self.round_done = {uid}  # сбрасываем — все должны ответить на рейз
-        return True, (
-            f"📈 {p['name']} — Рейз до {self.current_bet}! "
-            f"Баланс: {p['balance']}"
-        )
+        self.round_done = {uid}
+        return True, f"📈 {p['name']} — Рейз до {self.current_bet}! Баланс: {p['balance']}"
 
     def action_allin(self, uid: int) -> str:
         p = self.players[uid]
@@ -2573,10 +2438,7 @@ class PokerGame:
         self.round_done.add(uid)
         return f"💥 {p['name']} — ВА-БАНК! (+{amount} монет в банк)"
 
-    # ── Переход к следующей стадии ────────────────────────────────────
-
     def is_round_over(self) -> bool:
-        """Все активные (не фолд, не олл-ин) игроки походили и ставки уравнены."""
         can_act = self.players_who_can_act()
         if not can_act:
             return True
@@ -2588,7 +2450,6 @@ class PokerGame:
         return True
 
     def advance_phase(self) -> str:
-        """Переходим к следующей фазе, возвращаем название."""
         transitions = {
             "preflop": "flop",
             "flop":    "turn",
@@ -2597,19 +2458,16 @@ class PokerGame:
         }
         self.phase = transitions.get(self.phase, "showdown")
 
-        # Сбрасываем ставки раунда
         for uid in self.order:
             self.players[uid]["bet"] = 0
         self.current_bet = 0
         self.round_done  = set()
 
-        # Открываем общие карты
         if self.phase == "flop":
             self.community = [self.deck.pop(), self.deck.pop(), self.deck.pop()]
         elif self.phase in ("turn", "river"):
             self.community.append(self.deck.pop())
 
-        # Первый ход после дилера
         n = len(self.order)
         idx = (self.dealer_idx + 1) % n
         for _ in range(n):
@@ -2623,10 +2481,7 @@ class PokerGame:
 
         return self.phase
 
-    # ── Определение победителя ────────────────────────────────────────
-
-    def showdown(self) -> list[tuple[int, str, str]]:
-        """Возвращает [(uid, hand_name, cards_str), ...] отсортированных по силе."""
+    def showdown(self) -> list[tuple]:
         alive = self.active_players()
         results = []
         for uid in alive:
@@ -2635,31 +2490,24 @@ class PokerGame:
             hand_name   = HAND_NAMES[rank[0]]
             cards_str   = " ".join(self.players[uid]["hole"])
             results.append((uid, hand_name, cards_str, rank, best5))
-
         results.sort(key=lambda x: x[3], reverse=True)
         return results
 
     def distribute_pot(self) -> dict[int, int]:
-        """Распределяем банк (учитывая олл-ины). Возвращает {uid: выигрыш}."""
         alive    = self.active_players()
         winnings: dict[int, int] = {uid: 0 for uid in self.order}
-
         if len(alive) == 1:
             winnings[alive[0]] = self.pot
             return winnings
-
-        # Упрощённое распределение: победитель берёт весь банк
-        # (без сайд-потов для простоты)
-        results = self.showdown()
+        results   = self.showdown()
         best_rank = results[0][3]
-        winners = [r for r in results if r[3] == best_rank]
-        share = self.pot // len(winners)
+        winners   = [r for r in results if r[3] == best_rank]
+        share     = self.pot // len(winners)
         for w in winners:
             winnings[w[0]] = share
-        # остаток первому победителю
         winnings[winners[0][0]] += self.pot - share * len(winners)
         return winnings
-# ── Хендлеры игры «Покер» ─────────────────────────────────────────────
+
 
 @dp.message(
     F.chat.type.in_({"group", "supergroup"}),
@@ -2674,14 +2522,11 @@ async def poker_create(message: Message):
     uid  = message.from_user.id
     name = message.from_user.full_name
     game = PokerGame(chat_id, uid, name)
+    user_data = get_user_safe(uid)
     game.players[uid] = {
-        "name": name, "hole": [], "balance": 0,
+        "name": name, "hole": [], "balance": user_data["balance"],
         "bet": 0, "total_bet": 0, "folded": False, "allin": False
     }
-    # Загружаем баланс из БД
-    user_data = get_user_safe(uid)
-    game.players[uid]["balance"] = user_data["balance"]
-
     poker_games[chat_id] = game
 
     await message.answer(
@@ -2693,7 +2538,6 @@ async def poker_create(message: Message):
         f"Блайнды: малый {POKER_SMALL_BLIND} / большой {POKER_BIG_BLIND} монет"
     )
 
-    # Авто-старт через 2 минуты
     async def auto_start():
         await asyncio.sleep(POKER_REG_SECONDS)
         g = poker_games.get(chat_id)
@@ -2715,7 +2559,6 @@ async def poker_or_bunker_join(message: Message):
     uid  = message.from_user.id
     name = message.from_user.full_name
 
-    # Покер
     game = poker_games.get(chat_id)
     if game and game.phase == "registration":
         if uid in game.players:
@@ -2742,7 +2585,6 @@ async def poker_or_bunker_join(message: Message):
         )
         return
 
-    # Бункер (старый обработчик)
     b_game = _bunker_active(chat_id)
     if b_game and b_game.phase == "registration":
         if uid in b_game.players:
@@ -2777,11 +2619,9 @@ async def poker_start_cmd(message: Message):
 
 
 async def _poker_begin(message: Message, game: PokerGame):
-    """Запускает покерную игру."""
     chat_id = game.chat_id
     game.start_game()
 
-    # Рассылаем карманные карты в ЛС
     failed = []
     for uid, p in game.players.items():
         try:
@@ -2819,16 +2659,12 @@ async def _poker_begin(message: Message, game: PokerGame):
 
 
 async def _poker_next_turn(message: Message, game: PokerGame):
-    """Объявляем ход следующего игрока."""
     chat_id = game.chat_id
-
-    # Проверяем — остался ли один игрок
     alive = game.active_players()
     if len(alive) == 1:
         await _poker_end_single(message, game, alive[0])
         return
 
-    # Проверяем — все сделали ход в этом раунде
     if game.is_round_over():
         if game.phase == "river":
             await _poker_showdown(message, game)
@@ -2841,15 +2677,12 @@ async def _poker_next_turn(message: Message, game: PokerGame):
             "showdown": "🏆 ВСКРЫТИЕ",
         }
         await message.answer(
-            f"\n{phase_labels.get(new_phase, new_phase)}\n\n"
-            + game.table_text()
+            f"\n{phase_labels.get(new_phase, new_phase)}\n\n" + game.table_text()
         )
-        # Если все олл-ин — пропускаем торговлю
         if not game.players_who_can_act():
             if new_phase == "showdown":
                 await _poker_showdown(message, game)
             else:
-                # Докидываем карты автоматически до ривера
                 while game.phase != "showdown" and not game.players_who_can_act():
                     np = game.advance_phase()
                     if np == "showdown":
@@ -2860,11 +2693,10 @@ async def _poker_next_turn(message: Message, game: PokerGame):
                 await _poker_showdown(message, game)
             return
 
-    # Находим текущего игрока
     current_uid = None
     n = len(game.order)
     for i in range(n):
-        idx = (game.current_idx) % n
+        idx = game.current_idx % n
         uid = game.order[idx]
         p   = game.players[uid]
         if not p["folded"] and not p["allin"]:
@@ -2874,7 +2706,6 @@ async def _poker_next_turn(message: Message, game: PokerGame):
         game.current_idx = (game.current_idx + 1) % n
 
     if current_uid is None:
-        # Все олл-ин или сфолдили
         if game.phase == "river":
             await _poker_showdown(message, game)
         else:
@@ -2894,11 +2725,7 @@ async def _poker_next_turn(message: Message, game: PokerGame):
     actions.append("<code>ва-банк</code>")
     actions.append("<code>фолд</code>")
 
-    try:
-        user_obj = await bot.get_chat_member(game.chat_id, current_uid)
-        mention  = f"<a href='tg://user?id={current_uid}'>{p['name']}</a>"
-    except Exception:
-        mention = f"<b>{p['name']}</b>"
+    mention = f"<a href='tg://user?id={current_uid}'>{p['name']}</a>"
 
     await message.answer(
         f"⏳ Ход игрока: {mention}\n"
@@ -2908,7 +2735,6 @@ async def _poker_next_turn(message: Message, game: PokerGame):
         f"<i>У тебя {POKER_TURN_SECONDS} секунд</i>"
     )
 
-    # Таймер автофолда
     if game.turn_task:
         game.turn_task.cancel()
 
@@ -2929,7 +2755,6 @@ async def _poker_next_turn(message: Message, game: PokerGame):
 
 
 async def _poker_end_single(message: Message, game: PokerGame, winner_id: int):
-    """Один победитель — все остальные сфолдили."""
     winner = game.players[winner_id]
     new_bal = winner["balance"] + game.pot
     update_user(winner_id, balance=new_bal)
@@ -2945,7 +2770,6 @@ async def _poker_end_single(message: Message, game: PokerGame, winner_id: int):
 
 
 async def _poker_showdown(message: Message, game: PokerGame):
-    """Вскрытие карт и определение победителя."""
     results  = game.showdown()
     winnings = game.distribute_pot()
 
@@ -2977,16 +2801,12 @@ async def _poker_showdown(message: Message, game: PokerGame):
         del poker_games[game.chat_id]
 
 
-# ── Обработчики действий игроков ─────────────────────────────────────
-
 def _get_poker_game_and_player(chat_id: int, uid: int):
-    """Возвращает (game, player_data) или (None, None)."""
     game = poker_games.get(chat_id)
     if not game or game.phase in ("registration", "showdown"):
         return None, None
     if uid not in game.players:
         return None, None
-    # Проверяем, что сейчас ход этого игрока
     if game.order[game.current_idx % len(game.order)] != uid:
         return None, None
     p = game.players[uid]
@@ -3000,9 +2820,7 @@ def _get_poker_game_and_player(chat_id: int, uid: int):
     F.text.func(lambda t: t and t.strip().lower() == "чек")
 )
 async def poker_check(message: Message):
-    game, p = _get_poker_game_and_player(
-        message.chat.id, message.from_user.id
-    )
+    game, p = _get_poker_game_and_player(message.chat.id, message.from_user.id)
     if not game:
         return
     ok, text = game.action_check(message.from_user.id)
@@ -3019,9 +2837,7 @@ async def poker_check(message: Message):
     F.text.func(lambda t: t and t.strip().lower() == "колл")
 )
 async def poker_call(message: Message):
-    game, p = _get_poker_game_and_player(
-        message.chat.id, message.from_user.id
-    )
+    game, p = _get_poker_game_and_player(message.chat.id, message.from_user.id)
     if not game:
         return
     if game.turn_task:
@@ -3037,9 +2853,7 @@ async def poker_call(message: Message):
     F.text.func(lambda t: t and t.strip().lower().startswith("рейз "))
 )
 async def poker_raise(message: Message):
-    game, p = _get_poker_game_and_player(
-        message.chat.id, message.from_user.id
-    )
+    game, p = _get_poker_game_and_player(message.chat.id, message.from_user.id)
     if not game:
         return
     parts = message.text.strip().split()
@@ -3061,9 +2875,7 @@ async def poker_raise(message: Message):
     F.text.func(lambda t: t and t.strip().lower() == "фолд")
 )
 async def poker_fold(message: Message):
-    game, p = _get_poker_game_and_player(
-        message.chat.id, message.from_user.id
-    )
+    game, p = _get_poker_game_and_player(message.chat.id, message.from_user.id)
     if not game:
         return
     if game.turn_task:
@@ -3079,9 +2891,7 @@ async def poker_fold(message: Message):
     F.text.func(lambda t: t and t.strip().lower() == "ва-банк")
 )
 async def poker_allin(message: Message):
-    game, p = _get_poker_game_and_player(
-        message.chat.id, message.from_user.id
-    )
+    game, p = _get_poker_game_and_player(message.chat.id, message.from_user.id)
     if not game:
         return
     if game.turn_task:
@@ -3119,17 +2929,17 @@ async def poker_cancel(message: Message):
         return
     if game.turn_task:
         game.turn_task.cancel()
-    # Возвращаем ставки игрокам
     for uid, p in game.players.items():
         if p["total_bet"] > 0:
             refund = p["balance"] + p["total_bet"]
             update_user(uid, balance=refund)
     del poker_games[chat_id]
     await message.answer("🚫 Покер отменён. Ставки возвращены игрокам.")
+
+
 # =====================================================================
 # ПЕРЕВОД ДЕНЕГ
 # =====================================================================
-
 @dp.message(
     F.chat.type.in_({"group", "supergroup"}),
     F.text.func(lambda t: t and t.strip().lower().startswith("перевод"))
@@ -3146,7 +2956,6 @@ async def transfer_money_group(message: Message):
     target_name = None
     amount      = None
 
-    # Вариант 1: ответ на чьё-то сообщение + "перевод 500"
     if message.reply_to_message and message.reply_to_message.from_user:
         ru = message.reply_to_message.from_user
         if ru.id == sender_id:
@@ -3160,14 +2969,10 @@ async def transfer_money_group(message: Message):
         if len(parts) == 2 and parts[1].isdigit():
             amount = int(parts[1])
 
-    # Вариант 2: "перевод @username 500"
     elif message.entities:
         for ent in message.entities:
             if ent.type == "mention":
                 uname = message.text[ent.offset:ent.offset + ent.length]
-                # Ищем среди участников — попробуем через get_chat_member если знаем username
-                # Для простоты ищем в БД по совпадению имени не получится,
-                # поэтому используем Telegram API
                 try:
                     chat_member = await bot.get_chat_member(message.chat.id, uname)
                     ru = chat_member.user
@@ -3193,13 +2998,11 @@ async def transfer_money_group(message: Message):
                 target_id   = ru.id
                 target_name = ru.full_name
 
-        # Ищем сумму — последний числовой аргумент
         for part in reversed(parts):
             if part.isdigit():
                 amount = int(part)
                 break
 
-    # Проверки
     if target_id is None:
         await message.answer(
             "❌ Не указан получатель.\n\n"
@@ -3230,14 +3033,12 @@ async def transfer_money_group(message: Message):
         )
         return
 
-    # Регистрируем получателя если его нет в БД
     register_user(target_id)
     receiver = get_user(target_id)
     if not receiver:
         await message.answer("❌ Получатель не найден в базе игры. Пусть напишет /start боту.")
         return
 
-    # Выполняем перевод
     new_sender_balance   = sender["balance"]   - amount
     new_receiver_balance = receiver["balance"] + amount
 
@@ -3256,7 +3057,6 @@ async def transfer_money_group(message: Message):
     )
 
 
-# Приватный вариант — на случай если кто-то пишет боту в ЛС
 @dp.message(
     F.chat.type == "private",
     F.text.func(lambda t: t and t.strip().lower().startswith("перевод"))
@@ -3268,16 +3068,17 @@ async def transfer_money_private(message: Message):
         "• <code>перевод @username 500</code>\n"
         "• Ответь на сообщение игрока и напиши <code>перевод 500</code>"
     )
+
+
 # =====================================================================
 # ХЕНДЛЕРЫ — ЛИЧНЫЕ СООБЩЕНИЯ
 # =====================================================================
-
 @dp.message(Command("start"), F.chat.type == "private")
 async def cmd_start_private(message: Message):
     get_user_safe(message.from_user.id)
     await message.answer(
         f"👋 Привет, <b>{message.from_user.full_name}</b>!\n\n"
-        "Добро пожаловать в игру ManasWorker»! Используй меню ниже.",
+        "Добро пожаловать в игру «МанасWorker»! Используй меню ниже.",
         reply_markup=get_main_menu()
     )
 
@@ -3318,10 +3119,12 @@ async def btn_shop_private(message: Message):
     user = get_user_safe(message.from_user.id)
     await message.answer(build_shop_text(user), reply_markup=get_shop_keyboard())
 
+
 def _is(text: str, *variants: str) -> bool:
     if not text:
         return False
     return text.strip().lower() in {v.lower() for v in variants}
+
 
 @dp.message(Command("start"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_start_group(message: Message):
@@ -3388,32 +3191,28 @@ async def txt_help_group(message: Message):
     await message.answer(HELP_TEXT)
 
 @dp.message(F.chat.type.in_({"group", "supergroup"}),
-            F.text.func(lambda t: t.strip().lower().startswith("акция ")))
+            F.text.func(lambda t: t and t.strip().lower().startswith("акция ")))
 async def txt_stock_group(message: Message):
     user    = get_user_safe(message.from_user.id)
     mention = message.from_user.mention_html()
-
-    parts = message.text.strip().split()
+    parts   = message.text.strip().split()
     if len(parts) != 3:
         await message.answer(
-            f"{mention}\n"
-            "❌ Неверный формат.\n"
+            f"{mention}\n❌ Неверный формат.\n"
             "Используй: <b>акция ап 300</b> / <b>акция давн 500</b> / <b>акция нейтрал 150</b>"
         )
         return
-
     outcome_input = parts[1].lower()
     try:
         bet = int(parts[2])
     except ValueError:
         await message.answer(f"{mention}\n❌ Сумма ставки должна быть числом.")
         return
-
     _, text = do_stock_bet(user, outcome_input, bet)
     await message.answer(f"{mention}\n{text}")
 
 @dp.message(F.chat.type == "private",
-            F.text.func(lambda t: t.strip().lower().startswith("акция ")))
+            F.text.func(lambda t: t and t.strip().lower().startswith("акция ")))
 async def txt_stock_private(message: Message):
     user  = get_user_safe(message.from_user.id)
     parts = message.text.strip().split()
@@ -3437,10 +3236,10 @@ async def txt_stock_private(message: Message):
 async def txt_help_private(message: Message):
     await message.answer(HELP_TEXT)
 
-# =====================================================================
-# CALLBACKS (RPG-часть)
-# =====================================================================
 
+# =====================================================================
+# CALLBACKS
+# =====================================================================
 @dp.callback_query(JobCallback.filter())
 async def callback_choose_job(callback: CallbackQuery, callback_data: JobCallback):
     user_id = callback.from_user.id
@@ -3451,11 +3250,9 @@ async def callback_choose_job(callback: CallbackQuery, callback_data: JobCallbac
     if not job:
         await callback.answer("❌ Профессия не найдена.", show_alert=True)
         return
-
     if user["job"] != "Безработный":
         await callback.answer("⛔ Ты уже выбрал профессию!", show_alert=True)
         return
-
     if job_key not in STARTER_JOB_KEYS:
         await callback.answer("❌ Нельзя начать с этой профессии.", show_alert=True)
         return
@@ -3472,7 +3269,7 @@ async def callback_choose_job(callback: CallbackQuery, callback_data: JobCallbac
 
 @dp.callback_query(UpgradeJobCallback.filter())
 async def callback_upgrade_job(callback: CallbackQuery, callback_data: UpgradeJobCallback):
-    user    = get_user_safe(callback.from_user.id)
+    user     = get_user_safe(callback.from_user.id)
     next_key = callback_data.job_key
     next_job = JOBS.get(next_key)
 
@@ -3554,12 +3351,13 @@ async def callback_train(callback: CallbackQuery, callback_data: TrainCallback):
             reply_markup=get_training_keyboard()
         )
 
+
 # =====================================================================
 # ТОЧКА ВХОДА
 # =====================================================================
 async def main():
     init_db()
-    print("✅ БД инициализирована. Бот КТУ Манас запускается...")
+    print("✅ PostgreSQL БД инициализирована. Бот КТУ Манас запускается...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
