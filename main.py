@@ -880,10 +880,46 @@ def init_db():
                     achievements          TEXT    DEFAULT ''
                 )
             """)
+            cur.execute("""
+                        CREATE TABLE IF NOT EXISTS event_chats
+                        (
+                            chat_id
+                            BIGINT
+                            PRIMARY
+                            KEY
+                        )
+                        """)
+            cur.execute("""
+                        CREATE TABLE IF NOT EXISTS active_event
+                        (
+                            id
+                            SERIAL
+                            PRIMARY
+                            KEY,
+                            event_key
+                            TEXT
+                            NOT
+                            NULL,
+                            started_at
+                            INTEGER
+                            NOT
+                            NULL,
+                            ends_at
+                            INTEGER
+                            NOT
+                            NULL
+                        )
+                        """)
+
             # Добавляем колонки если их нет (для старых БД)
             for col, definition in [
                 ("username",     "TEXT DEFAULT ''"),
                 ("achievements", "TEXT DEFAULT ''"),
+                ("pet_id", "TEXT DEFAULT ''"),
+                ("pet_bonus", "INTEGER DEFAULT 0"),
+                ("reputation", "INTEGER DEFAULT 0"),
+                ("active_event", "TEXT DEFAULT ''"),
+                ("event_ends_at", "INTEGER DEFAULT 0"),
             ]:
                 try:
                     cur.execute(f"ALTER TABLE users ADD COLUMN {col} {definition}")
@@ -1191,10 +1227,16 @@ def do_work(user: dict) -> tuple[bool, str]:
         branch       = None
     else:
         base_coins = random.randint(job["min_reward"], job["max_reward"])
-        base_exp   = random.randint(job["min_exp"],    job["max_exp"])
+        base_exp = random.randint(job["min_exp"], job["max_exp"])
         earned_coins = scale_coins(base_coins, lvl)
-        earned_exp   = scale_xp(base_exp, lvl)
-        branch       = job["branch"]
+        earned_exp = scale_xp(base_exp, lvl)
+        earned_coins, earned_exp = apply_pet_bonus(user, earned_coins, earned_exp)
+        branch = job["branch"]
+
+        # Ивент-множители
+        ev_coins_mult, ev_xp_mult, ev_lucky, _ = get_event_multipliers()
+        earned_coins = int(earned_coins * ev_coins_mult)
+        earned_exp = int(earned_exp * ev_xp_mult)
 
     rank = user.get("job_rank", 1)
     if rank > 1:
@@ -1206,7 +1248,8 @@ def do_work(user: dict) -> tuple[bool, str]:
     event_prefix = ""
     if random.random() < 0.20:
         luck = user.get("luck", 1)
-        pos_chance = min(luck * 4, 60) / 100
+        _, _, ev_lucky, _ = get_event_multipliers()
+        pos_chance = min(luck * 4 + ev_lucky, 95) / 100
         branch_events = WORK_EVENTS.get(branch, {}) if branch else {}
 
         if random.random() < pos_chance:
@@ -1240,10 +1283,18 @@ def do_work(user: dict) -> tuple[bool, str]:
     level_block = "".join(level_msgs)
 
     ach_msgs = check_and_grant_achievements(user)
-    # и добавь их в итоговый текст:
     ach_block = ("\n\n" + "\n".join(ach_msgs)) if ach_msgs else ""
-    # затем в return добавь ach_block в конец строки
 
+    quest_msgs = update_quest_progress(user["user_id"], "work")
+    quest_msgs += update_quest_progress(user["user_id"], "earn", earned_coins)
+    quest_block = ("\n\n" + "\n".join(quest_msgs)) if quest_msgs else ""
+
+    if event_line:
+        if "🔥" in event_line:
+            change_reputation(user["user_id"], +1)
+        elif "⚠️" in event_line:
+            change_reputation(user["user_id"], -1)
+    change_reputation(user["user_id"], +1)  # за работу всегда +1
     event_block = f"\n\n{event_prefix}{event_line}" if event_line else ""
     max_energy  = get_max_energy(user)
 
@@ -1255,6 +1306,8 @@ def do_work(user: dict) -> tuple[bool, str]:
         f"⚡ Энергия: <b>{new_energy}</b> / {max_energy}  (-{WORK_ENERGY_COST})\n"
         f"📊 Итого монет: <b>{user['balance']}</b>"
         f"{level_block}"
+        f"{ach_block}"
+        f"{quest_block}"
     )
 
 # =====================================================================
@@ -1365,6 +1418,7 @@ def do_train(user: dict, stat: str) -> tuple[bool, str]:
     new_energy = max(0, user["energy"] - TRAIN_ENERGY_COST)
     new_stat   = user[stat] + 1
     update_user(user["user_id"], energy=new_energy, **{stat: new_stat})
+    quest_msgs = update_quest_progress(user["user_id"], "train")
     updated    = {**user, stat: new_stat, "energy": new_energy}
     max_energy = get_max_energy(updated)
     return True, (
@@ -1419,18 +1473,22 @@ def do_buy_item(user: dict, item_key: str) -> tuple[bool, str]:
         return False, "❌ Такого товара нет."
     if user.get(item["flag"]):
         return False, f"У тебя уже есть {item['name']}!"
-    if user["balance"] < item["price"]:
+    _, _, _, ev_discount = get_event_multipliers()
+    base_price = int(item["price"] * (1 - ev_discount / 100))
+    actual_price = apply_rep_to_price(user, base_price)
+    if user["balance"] < actual_price:
         return False, (
             f"❌ Недостаточно монет.\n"
-            f"Нужно: <b>{item['price']}</b>, есть: <b>{user['balance']}</b>."
+            f"Нужно: <b>{actual_price}</b>, есть: <b>{user['balance']}</b>."
         )
-    new_balance = user["balance"] - item["price"]
+    new_balance = user["balance"] - actual_price
     extra = {item["flag"]: 1}
     if "skill_bonus" in item:
         skill_key, skill_bonus = item["skill_bonus"]
         extra[skill_key] = user.get(skill_key, 0) + skill_bonus
 
     update_user(user["user_id"], balance=new_balance, **extra)
+    update_quest_progress(user["user_id"], "spend", item["price"])
 
     bonus_line = ""
     if "skill_bonus" in item:
@@ -1451,10 +1509,13 @@ def do_use_consumable(user: dict, item_key: str) -> tuple[bool, str]:
     item = CONSUMABLES.get(item_key)
     if not item:
         return False, "❌ Такого предмета нет."
-    if user["balance"] < item["price"]:
+    _, _, _, ev_discount = get_event_multipliers()
+    base_price = int(item["price"] * (1 - ev_discount / 100))
+    actual_price = apply_rep_to_price(user, base_price)
+    if user["balance"] < actual_price:
         return False, (
             f"❌ Недостаточно монет.\n"
-            f"Нужно: <b>{item['price']}</b>, есть: <b>{user['balance']}</b>."
+            f"Нужно: <b>{actual_price}</b>, есть: <b>{user['balance']}</b>."
         )
     max_hp     = get_max_hp(user)
     max_energy = get_max_energy(user)
@@ -1462,8 +1523,9 @@ def do_use_consumable(user: dict, item_key: str) -> tuple[bool, str]:
     old_energy = user["energy"]
     new_hp     = min(max_hp,     old_hp     + item["hp"])
     new_energy = min(max_energy, old_energy + item["energy"])
-    new_balance = user["balance"] - item["price"]
+    new_balance = user["balance"] - actual_price
     update_user(user["user_id"], hp=new_hp, energy=new_energy, balance=new_balance)
+    update_quest_progress(user["user_id"], "spend", item["price"])
 
     gained_hp     = new_hp     - old_hp
     gained_energy = new_energy - old_energy
@@ -1486,6 +1548,8 @@ def build_profile_text(user: dict, mention: str) -> str:
     rank       = user.get("job_rank", 1)
     job        = get_job(user)
     grade      = job["grade"] if job else 0
+    rep = user.get("reputation", 0)
+    rep_title, _ = get_rep_title(rep)
 
     inv_parts = []
     for key, item in SHOP_ITEMS.items():
@@ -1506,6 +1570,7 @@ def build_profile_text(user: dict, mention: str) -> str:
         f"💼 Профессия: <b>{user['job']}</b>"
         + (f"  [Грейд {grade}/9, Ранг {rank}]" if grade > 0 else "") + "\n"
         f"⭐ Уровень: <b>{lvl}</b>\n"
+        f"⭐ Репутация:     <b>{rep}</b> ({rep_title})\n"                                                               
         f"✨ Опыт: <b>{user['exp']}</b> / {needed_xp}\n"
         f"💰 Баланс: <b>{user['balance']}</b> монет\n\n"
         f"━━━ 💗 Ресурсы ━━━\n"
@@ -1589,6 +1654,8 @@ def do_stock_bet(user: dict, outcome_input: str, bet: int) -> tuple[bool, str]:
     if won:
         new_balance = user["balance"] + bet
         update_user(user["user_id"], balance=new_balance)
+        change_reputation(user["user_id"], +1)
+        update_quest_progress(user["user_id"], "stock")
         phrase = random.choice(STOCK_WIN_PHRASES)
         text = (
             f"📊 <b>Рынок пришёл в движение!</b>\n"
@@ -1601,6 +1668,7 @@ def do_stock_bet(user: dict, outcome_input: str, bet: int) -> tuple[bool, str]:
     else:
         new_balance = user["balance"] - bet
         update_user(user["user_id"], balance=new_balance)
+        change_reputation(user["user_id"], -1)
         phrase = random.choice(STOCK_LOSE_PHRASES)
         player_label = STOCK_LABELS[outcome_input]
         text = (
@@ -2411,6 +2479,20 @@ HELP_TEXT = (
     "━━━ 🏆 Рейтинг ━━━\n"
     "/top — топ-10 богачей\n"
     "/my_place — твоё место в рейтинге\n\n"
+    "━━━ ⚔️ Дуэли ━━━\n"
+    "<b>дуэль @username 500</b> — вызвать игрока на дуэль\n"
+    "<i>Победитель определяется по характеристикам + удача. Ставка переходит победителю.</i>\n\n"
+    "━━━ 🐾 Питомцы ━━━\n"
+    "<b>гача</b> или /gacha — крутить гачу и управлять питомцем\n"
+    f"<i>Цена броска: 2000 монет. Дубликат = бонус питомца растёт!</i>\n\n"
+    "━━━ 🎲 Мини-игры ━━━\n"
+    "<b>кости @username 500</b> — бросить кости с игроком\n"
+    "<b>слоты 200</b> — покрутить слоты\n"
+    f"  <i>Мин. ставка слотов: 50 монет</i>\n"
+    "  🍒🍒🍒 x3 | ⭐⭐⭐ x5 | 💎💎💎 x10 | 7️⃣7️⃣7️⃣ x20\n\n"
+    "━━━ 🎉 Ивенты ━━━\n"
+    "<b>ивент</b> или /current_event — посмотреть активный ивент\n"
+    "<i>Ивенты запускаются автоматически и объявляются всем игрокам!</i>\n\n"
     "━━━ ℹ️ Прочее ━━━\n"
     "<b>Команда</b> — показать это меню помощи\n\n"
     "💡 <i>Все команды работают без учёта регистра</i>"
@@ -3342,6 +3424,7 @@ def _is(text: str, *variants: str) -> bool:
 @dp.message(Command("start"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_start_group(message: Message):
     user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
+    save_chat(message.chat.id)
     await message.answer(
         f"👋 {message.from_user.mention_html()}, добро пожаловать!\n"
         f"Пиши <b>Профиль</b>, <b>Работа</b>, <b>Профессии</b>, "
@@ -3799,10 +3882,1325 @@ async def cmd_set_stat(message: Message):
         f"установлен в <b>{value}</b>"
     )
 # =====================================================================
+# ДУЭЛИ
+# =====================================================================
+active_duels: dict[int, dict] = {}  # chat_id -> duel data
+
+@dp.message(
+    F.chat.type.in_({"group", "supergroup"}),
+    F.text.func(lambda t: t and t.strip().lower().startswith("дуэль "))
+)
+async def duel_challenge(message: Message):
+    chat_id   = message.chat.id
+    challenger_id   = message.from_user.id
+    challenger_name = message.from_user.full_name
+
+    if chat_id in active_duels:
+        await message.answer("⚔️ В этом чате уже идёт дуэль! Дождитесь окончания.")
+        return
+
+    # Парсим ставку
+    parts = message.text.strip().split()
+    bet   = None
+    for p in reversed(parts):
+        if p.isdigit():
+            bet = int(p)
+            break
+
+    if not bet or bet <= 0:
+        await message.answer("❌ Укажи ставку: <code>дуэль @username 500</code>")
+        return
+
+    # Определяем цель
+    target_id   = None
+    target_name = None
+
+    if message.reply_to_message and message.reply_to_message.from_user:
+        ru = message.reply_to_message.from_user
+        if not ru.is_bot:
+            target_id   = ru.id
+            target_name = ru.full_name
+    else:
+        if message.entities:
+            for ent in message.entities:
+                if ent.type == "text_mention" and ent.user:
+                    target_id   = ent.user.id
+                    target_name = ent.user.full_name
+                    break
+                elif ent.type == "mention":
+                    uname = message.text[ent.offset:ent.offset + ent.length]
+                    try:
+                        cm = await bot.get_chat_member(chat_id, uname)
+                        target_id   = cm.user.id
+                        target_name = cm.user.full_name
+                    except Exception:
+                        pass
+                    break
+
+    if not target_id:
+        await message.answer("❌ Укажи игрока: <code>дуэль @username 500</code>")
+        return
+    if target_id == challenger_id:
+        await message.answer("❌ Нельзя вызвать на дуэль самого себя!")
+        return
+
+    challenger = get_user_safe(challenger_id)
+    if challenger["balance"] < bet:
+        await message.answer(
+            f"❌ Недостаточно монет!\n"
+            f"Ставка: <b>{bet}</b> | Баланс: <b>{challenger['balance']}</b>"
+        )
+        return
+
+    register_user(target_id)
+    target = get_user(target_id)
+    if not target:
+        await message.answer("❌ Противник не зарегистрирован в игре.")
+        return
+    if target["balance"] < bet:
+        await message.answer(
+            f"❌ У <b>{target_name}</b> недостаточно монет для этой ставки.\n"
+            f"Его баланс: <b>{target['balance']}</b>"
+        )
+        return
+
+    active_duels[chat_id] = {
+        "challenger_id":   challenger_id,
+        "challenger_name": challenger_name,
+        "target_id":       target_id,
+        "target_name":     target_name,
+        "bet":             bet,
+        "accepted":        False,
+    }
+
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="⚔️ Принять дуэль",
+        callback_data=f"duel_accept:{chat_id}:{target_id}"
+    )
+    builder.button(
+        text="🏳️ Отказаться",
+        callback_data=f"duel_decline:{chat_id}:{target_id}"
+    )
+    builder.adjust(2)
+
+    await message.answer(
+        f"⚔️ <b>ВЫЗОВ НА ДУЭЛЬ!</b>\n\n"
+        f"🗡 {challenger_name} вызывает {target_name}\n"
+        f"💰 Ставка: <b>{bet}</b> монет\n\n"
+        f"<a href='tg://user?id={target_id}'>{target_name}</a>, принимаешь вызов?",
+        reply_markup=builder.as_markup()
+    )
+
+    # Автоотмена через 60 секунд
+    async def auto_cancel():
+        await asyncio.sleep(60)
+        if chat_id in active_duels and not active_duels[chat_id]["accepted"]:
+            del active_duels[chat_id]
+            await message.answer(
+                f"⏰ <b>{target_name}</b> не ответил на вызов. Дуэль отменена."
+            )
+    asyncio.create_task(auto_cancel())
+
+
+@dp.callback_query(F.data.startswith("duel_accept:"))
+async def duel_accept(callback: CallbackQuery):
+    parts   = callback.data.split(":")
+    chat_id = int(parts[1])
+    tid     = int(parts[2])
+
+    if callback.from_user.id != tid:
+        await callback.answer("Это не твой вызов!", show_alert=True)
+        return
+
+    duel = active_duels.get(chat_id)
+    if not duel:
+        await callback.answer("Дуэль уже недействительна.", show_alert=True)
+        return
+
+    duel["accepted"] = True
+    await callback.answer()
+
+    c_id   = duel["challenger_id"]
+    c_name = duel["challenger_name"]
+    t_id   = duel["target_id"]
+    t_name = duel["target_name"]
+    bet    = duel["bet"]
+
+    challenger = get_user(c_id)
+    target     = get_user(t_id)
+
+    # Проверяем балансы ещё раз
+    if challenger["balance"] < bet or target["balance"] < bet:
+        del active_duels[chat_id]
+        await callback.message.answer("❌ У одного из игроков не хватает монет. Дуэль отменена.")
+        return
+
+    # Считаем силу — характеристики + рандом
+    def calc_power(user: dict) -> tuple[int, int]:
+        base = (
+            user["agility"]   * 3 +
+            user["endurance"] * 3 +
+            user["charisma"]  * 2 +
+            user["intellect"] * 2 +
+            user["luck"]      * 2
+        )
+        roll = random.randint(1, 50)
+        return base + roll, roll
+
+    c_power, c_roll = calc_power(challenger)
+    t_power, t_roll = calc_power(target)
+
+    await callback.message.answer(
+        f"⚔️ <b>ДУЭЛЬ НАЧАЛАСЬ!</b>\n\n"
+        f"🗡 {c_name}\n"
+        f"   Сила: {c_power} (стат: {c_power - c_roll} + 🎲{c_roll})\n\n"
+        f"🛡 {t_name}\n"
+        f"   Сила: {t_power} (стат: {t_power - t_roll} + 🎲{t_roll})\n\n"
+        f"💰 Ставка: <b>{bet}</b> монет"
+    )
+
+    await asyncio.sleep(2)
+
+    if c_power == t_power:
+        # Ничья
+        del active_duels[chat_id]
+        await callback.message.answer(
+            f"🤝 <b>НИЧЬЯ!</b>\n\n"
+            f"Силы равны ({c_power} vs {t_power}).\n"
+            f"Монеты остаются у каждого."
+        )
+        return
+
+    if c_power > t_power:
+        winner_id, winner_name = c_id, c_name
+        loser_id,  loser_name  = t_id, t_name
+        winner_user, loser_user = challenger, target
+    else:
+        winner_id, winner_name = t_id, t_name
+        loser_id,  loser_name  = c_id, c_name
+        winner_user, loser_user = target, challenger
+
+    new_winner_bal = winner_user["balance"] + bet
+    new_loser_bal  = max(0, loser_user["balance"] - bet)
+    update_user(winner_id, balance=new_winner_bal)
+    update_user(loser_id,  balance=new_loser_bal)
+    change_reputation(winner_id, +3)
+    change_reputation(loser_id, -2)
+
+    del active_duels[chat_id]
+
+    # Проверяем ачивки победителя
+    updated_winner = get_user(winner_id)
+    check_and_grant_achievements(updated_winner)
+    update_quest_progress(winner_id, "duel_win")
+
+    await callback.message.answer(
+        f"🏆 <b>ПОБЕДИТЕЛЬ — {winner_name}!</b>\n\n"
+        f"⚔️ {c_power} vs {t_power}\n\n"
+        f"💰 {winner_name} получает <b>+{bet}</b> монет → {new_winner_bal}\n"
+        f"💸 {loser_name} теряет <b>-{bet}</b> монет → {new_loser_bal}"
+    )
+
+
+@dp.callback_query(F.data.startswith("duel_decline:"))
+async def duel_decline(callback: CallbackQuery):
+    parts   = callback.data.split(":")
+    chat_id = int(parts[1])
+    tid     = int(parts[2])
+
+    if callback.from_user.id != tid:
+        await callback.answer("Это не твой вызов!", show_alert=True)
+        return
+
+    duel = active_duels.get(chat_id)
+    if not duel:
+        await callback.answer("Дуэль уже недействительна.", show_alert=True)
+        return
+
+    del active_duels[chat_id]
+    await callback.answer()
+    await callback.message.answer(
+        f"🏳️ <b>{duel['target_name']}</b> отказался от дуэли. Трус! 🐔"
+    )
+# =====================================================================
+# ЕЖЕДНЕВНЫЕ КВЕСТЫ
+# =====================================================================
+DAILY_QUESTS = [
+    {"id": "work_3",    "name": "💼 Трудяга",        "desc": "Отработай 3 смены",           "type": "work",     "target": 3,    "reward_coins": 300,   "reward_exp": 100},
+    {"id": "work_5",    "name": "💼 Стахановец",      "desc": "Отработай 5 смен",            "type": "work",     "target": 5,    "reward_coins": 600,   "reward_exp": 200},
+    {"id": "work_10",   "name": "💼 Работоголик",     "desc": "Отработай 10 смен",           "type": "work",     "target": 10,   "reward_coins": 1500,  "reward_exp": 500},
+    {"id": "earn_500",  "name": "💰 Копилка",         "desc": "Заработай 500 монет за смены","type": "earn",     "target": 500,  "reward_coins": 200,   "reward_exp": 80},
+    {"id": "earn_2000", "name": "💰 Кошелёк",         "desc": "Заработай 2000 монет",        "type": "earn",     "target": 2000, "reward_coins": 800,   "reward_exp": 300},
+    {"id": "earn_5000", "name": "💰 Сейф",            "desc": "Заработай 5000 монет",        "type": "earn",     "target": 5000, "reward_coins": 2000,  "reward_exp": 700},
+    {"id": "train_2",   "name": "🏋️ Разминка",        "desc": "Проведи 2 тренировки",        "type": "train",    "target": 2,    "reward_coins": 150,   "reward_exp": 60},
+    {"id": "train_5",   "name": "🏋️ Спортсмен",       "desc": "Проведи 5 тренировок",        "type": "train",    "target": 5,    "reward_coins": 400,   "reward_exp": 150},
+    {"id": "spend_500", "name": "🛒 Шопоголик",       "desc": "Потрать 500 монет в магазине","type": "spend",    "target": 500,  "reward_coins": 200,   "reward_exp": 80},
+    {"id": "stock_3",   "name": "📈 Брокер",          "desc": "Сделай 3 ставки на бирже",    "type": "stock",    "target": 3,    "reward_coins": 300,   "reward_exp": 100},
+    {"id": "duel_1",    "name": "⚔️ Боец",            "desc": "Выиграй 1 дуэль",             "type": "duel_win", "target": 1,    "reward_coins": 500,   "reward_exp": 200},
+    {"id": "duel_3",    "name": "⚔️ Гладиатор",       "desc": "Выиграй 3 дуэли",             "type": "duel_win", "target": 3,    "reward_coins": 1200,  "reward_exp": 500},
+]
+
+# Хранилище прогресса квестов (в памяти, сбрасывается при рестарте — для надёжности лучше в БД)
+# Структура: {user_id: {"date": "2024-01-01", "quests": {quest_id: progress}, "completed": set()}}
+daily_quest_progress: dict[int, dict] = {}
+
+def get_today() -> str:
+    from datetime import date
+    return str(date.today())
+
+def get_user_quests(user_id: int) -> dict:
+    today = get_today()
+    data  = daily_quest_progress.get(user_id)
+
+    if not data or data["date"] != today:
+        # Новый день — выдаём 3 случайных квеста
+        chosen = random.sample(DAILY_QUESTS, 3)
+        daily_quest_progress[user_id] = {
+            "date":      today,
+            "quests":    {q["id"]: 0 for q in chosen},
+            "chosen":    chosen,
+            "completed": set(),
+        }
+
+    return daily_quest_progress[user_id]
+
+def update_quest_progress(user_id: int, quest_type: str, amount: int = 1) -> list[str]:
+    """Обновляет прогресс квестов и возвращает сообщения о завершённых."""
+    data      = get_user_quests(user_id)
+    messages  = []
+    user      = get_user(user_id)
+    if not user:
+        return messages
+
+    for q in data["chosen"]:
+        if q["id"] in data["completed"]:
+            continue
+        if q["type"] != quest_type:
+            continue
+
+        data["quests"][q["id"]] = data["quests"].get(q["id"], 0) + amount
+
+        if data["quests"][q["id"]] >= q["target"]:
+            data["completed"].add(q["id"])
+            new_balance = user["balance"] + q["reward_coins"]
+            new_exp     = user["exp"]     + q["reward_exp"]
+            update_user(user_id, balance=new_balance, exp=new_exp)
+            user["balance"] = new_balance
+            user["exp"]     = new_exp
+            change_reputation(user_id, +2)
+            messages.append(
+                f"✅ <b>Квест выполнен!</b> {q['name']}\n"
+                f"<i>{q['desc']}</i>\n"
+                f"🎁 +{q['reward_coins']} монет, +{q['reward_exp']} XP"
+            )
+
+    return messages
+
+@dp.message(Command("quests"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("квесты", "квест", "задания")))
+async def cmd_quests(message: Message):
+    uid  = message.from_user.id
+    user = get_user_safe(uid, message.from_user.username or message.from_user.full_name)
+    data = get_user_quests(uid)
+
+    lines = [f"📋 <b>Ежедневные квесты</b> (обновляются каждый день)\n"]
+
+    for q in data["chosen"]:
+        progress  = data["quests"].get(q["id"], 0)
+        completed = q["id"] in data["completed"]
+        icon      = "✅" if completed else "🔄"
+        bar_fill  = min(progress, q["target"])
+        bar       = "█" * int(bar_fill / q["target"] * 10) + "░" * (10 - int(bar_fill / q["target"] * 10))
+
+        lines.append(
+            f"{icon} <b>{q['name']}</b>\n"
+            f"   {q['desc']}\n"
+            f"   [{bar}] {min(progress, q['target'])}/{q['target']}\n"
+            f"   🎁 {q['reward_coins']} монет + {q['reward_exp']} XP"
+        )
+
+    completed_count = len(data["completed"])
+    lines.append(f"\n📊 Выполнено: <b>{completed_count}/3</b>")
+
+    if completed_count == 3:
+        lines.append("🏆 <b>Все квесты выполнены! Заходи завтра за новыми.</b>")
+
+    await message.answer("\n\n".join(lines))
+
+# =====================================================================
+# ПИТОМЦЫ (ГАЧА)
+# =====================================================================
+PETS = {
+    "cat": {
+        "name":        "🐱 Котик",
+        "rarity":      "common",
+        "rarity_label":"⚪ Обычный",
+        "bonus_type":  "coins",
+        "bonus_label": "монеты с работы",
+        "base_bonus":  3,
+        "description": "Мурлычет и приносит монетки.",
+        "weight":      40,
+    },
+    "dog": {
+        "name":        "🐶 Пёсик",
+        "rarity":      "common",
+        "rarity_label":"⚪ Обычный",
+        "bonus_type":  "coins",
+        "bonus_label": "монеты с работы",
+        "base_bonus":  3,
+        "description": "Верный друг, любит монеты.",
+        "weight":      40,
+    },
+    "fox": {
+        "name":        "🦊 Лисичка",
+        "rarity":      "rare",
+        "rarity_label":"🔵 Редкий",
+        "bonus_type":  "xp",
+        "bonus_label": "опыт с работы",
+        "base_bonus":  5,
+        "description": "Хитрая и быстро учится.",
+        "weight":      25,
+    },
+    "owl": {
+        "name":        "🦉 Сова",
+        "rarity":      "rare",
+        "rarity_label":"🔵 Редкий",
+        "bonus_type":  "xp",
+        "bonus_label": "опыт с работы",
+        "base_bonus":  5,
+        "description": "Мудрая птица, даёт опыт.",
+        "weight":      25,
+    },
+    "dragon": {
+        "name":        "🐉 Дракончик",
+        "rarity":      "epic",
+        "rarity_label":"🟣 Эпик",
+        "bonus_type":  "coins",
+        "bonus_label": "монеты с работы",
+        "base_bonus":  10,
+        "description": "Огненный зверь, богатство само идёт.",
+        "weight":      10,
+    },
+    "unicorn": {
+        "name":        "🦄 Единорог",
+        "rarity":      "epic",
+        "rarity_label":"🟣 Эпик",
+        "bonus_type":  "xp",
+        "bonus_label": "опыт с работы",
+        "base_bonus":  10,
+        "description": "Магическое существо, опыт x бонус.",
+        "weight":      10,
+    },
+    "phoenix": {
+        "name":        "🔥 Феникс",
+        "rarity":      "legendary",
+        "rarity_label":"🟡 Легендарный",
+        "bonus_type":  "both",
+        "bonus_label": "монеты И опыт",
+        "base_bonus":  15,
+        "description": "Легендарная птица. Бонус ко всему.",
+        "weight":      3,
+    },
+    "manul": {
+        "name":        "🐈 Манул",
+        "rarity":      "legendary",
+        "rarity_label":"🟡 Легендарный",
+        "bonus_type":  "both",
+        "bonus_label": "монеты И опыт",
+        "base_bonus":  15,
+        "description": "Редчайший степной кот. Приносит удачу.",
+        "weight":      2,
+    },
+}
+
+PET_GACHA_PRICE = 2000
+
+def gacha_pull(user: dict) -> tuple[str, dict, bool]:
+    """
+    Крутит гачу. Возвращает (pet_key, pet_data, is_duplicate).
+    Если дубликат — бонус питомца растёт на 1.
+    """
+    weights    = [p["weight"] for p in PETS.values()]
+    pet_keys   = list(PETS.keys())
+    chosen_key = random.choices(pet_keys, weights=weights, k=1)[0]
+    chosen_pet = PETS[chosen_key]
+
+    current_pet_id    = user.get("pet_id", "")
+    current_pet_bonus = user.get("pet_bonus", 0)
+    is_duplicate      = (current_pet_id == chosen_key)
+
+    if is_duplicate:
+        # Дубликат — качаем бонус питомца +1 (максимум +20)
+        new_bonus = min(current_pet_bonus + 1, 20)
+        update_user(user["user_id"], pet_bonus=new_bonus)
+    else:
+        # Новый питомец — заменяем
+        update_user(
+            user["user_id"],
+            pet_id=chosen_key,
+            pet_bonus=chosen_pet["base_bonus"]
+        )
+
+    return chosen_key, chosen_pet, is_duplicate
+
+
+def get_pet_bonus(user: dict) -> tuple[int, int]:
+    """Возвращает (bonus_coins_pct, bonus_xp_pct) в процентах."""
+    pet_id = user.get("pet_id", "")
+    if not pet_id or pet_id not in PETS:
+        return 0, 0
+
+    pet   = PETS[pet_id]
+    bonus = user.get("pet_bonus", pet["base_bonus"])
+
+    if pet["bonus_type"] == "coins":
+        return bonus, 0
+    elif pet["bonus_type"] == "xp":
+        return 0, bonus
+    elif pet["bonus_type"] == "both":
+        return bonus, bonus
+    return 0, 0
+
+
+def apply_pet_bonus(user: dict, coins: int, xp: int) -> tuple[int, int]:
+    """Применяет бонус питомца к монетам и опыту."""
+    coin_pct, xp_pct = get_pet_bonus(user)
+    new_coins = int(coins * (1 + coin_pct / 100))
+    new_xp    = int(xp    * (1 + xp_pct   / 100))
+    return new_coins, new_xp
+
+
+@dp.message(Command("gacha"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("гача", "питомец", "gacha")))
+async def cmd_gacha(message: Message):
+    uid  = message.from_user.id
+    user = get_user_safe(uid, message.from_user.username or message.from_user.full_name)
+
+    pet_id = user.get("pet_id", "")
+    lines  = [f"🎰 <b>Гача — питомцы</b>\n"]
+    lines.append(f"💰 Цена одного броска: <b>{PET_GACHA_PRICE} монет</b>\n")
+
+    if pet_id and pet_id in PETS:
+        pet   = PETS[pet_id]
+        bonus = user.get("pet_bonus", pet["base_bonus"])
+        lines.append(
+            f"🐾 <b>Твой питомец:</b> {pet['name']} {pet['rarity_label']}\n"
+            f"   Бонус: <b>+{bonus}%</b> к {pet['bonus_label']}\n"
+            f"   <i>{pet['description']}</i>\n"
+        )
+    else:
+        lines.append("🐾 У тебя пока нет питомца.\n")
+
+    lines.append("━━━ Шансы ━━━")
+    lines.append("⚪ Обычный:     ~55%")
+    lines.append("🔵 Редкий:      ~35%")
+    lines.append("🟣 Эпик:        ~9%")
+    lines.append("🟡 Легендарный: ~1%")
+    lines.append(
+        "\n<i>Если выпадет тот же питомец — бонус вырастет на 1% (макс +20%)</i>"
+    )
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text=f"🎰 Крутить ({PET_GACHA_PRICE} монет)", callback_data="gacha_pull")
+    builder.button(text="📋 Все питомцы", callback_data="gacha_list")
+    builder.adjust(1)
+
+    await message.answer("\n".join(lines), reply_markup=builder.as_markup())
+
+
+@dp.callback_query(F.data == "gacha_pull")
+async def callback_gacha_pull(callback: CallbackQuery):
+    uid  = callback.from_user.id
+    user = get_user_safe(uid)
+
+    if user["balance"] < PET_GACHA_PRICE:
+        await callback.answer(
+            f"❌ Нужно {PET_GACHA_PRICE} монет, есть {user['balance']}",
+            show_alert=True
+        )
+        return
+
+    new_balance = user["balance"] - PET_GACHA_PRICE
+    update_user(uid, balance=new_balance)
+
+    pet_key, pet, is_duplicate = gacha_pull(user)
+    updated = get_user(uid)
+    new_bonus = updated.get("pet_bonus", pet["base_bonus"])
+
+    if is_duplicate:
+        text = (
+            f"🎰 <b>Крутим гачу...</b>\n\n"
+            f"✨ Выпал: {pet['name']} {pet['rarity_label']}\n\n"
+            f"🔄 <b>Дубликат!</b> Питомец уже есть.\n"
+            f"💪 Бонус питомца вырос: <b>+{new_bonus}%</b> к {pet['bonus_label']}\n\n"
+            f"💰 Баланс: <b>{new_balance}</b> монет"
+        )
+    else:
+        text = (
+            f"🎰 <b>Крутим гачу...</b>\n\n"
+            f"🎉 <b>НОВЫЙ ПИТОМЕЦ!</b>\n"
+            f"{pet['name']} {pet['rarity_label']}\n"
+            f"<i>{pet['description']}</i>\n\n"
+            f"🎁 Бонус: <b>+{new_bonus}%</b> к {pet['bonus_label']}\n\n"
+            f"💰 Баланс: <b>{new_balance}</b> монет"
+        )
+
+    await callback.answer()
+    await callback.message.answer(text)
+
+    # Квест и ачивки
+    update_quest_progress(uid, "gacha")
+    check_and_grant_achievements(updated)
+
+
+@dp.callback_query(F.data == "gacha_list")
+async def callback_gacha_list(callback: CallbackQuery):
+    user   = get_user_safe(callback.from_user.id)
+    my_pet = user.get("pet_id", "")
+
+    lines = ["📋 <b>Все питомцы</b>\n"]
+    for key, pet in PETS.items():
+        owned = "✅" if my_pet == key else "  "
+        lines.append(
+            f"{owned} {pet['name']} {pet['rarity_label']}\n"
+            f"     +{pet['base_bonus']}% к {pet['bonus_label']}\n"
+            f"     <i>{pet['description']}</i>"
+        )
+
+    await callback.answer()
+    await callback.message.answer("\n\n".join(lines))
+# =====================================================================
+# РЕПУТАЦИЯ
+# =====================================================================
+REP_MAX =  100
+REP_MIN = -100
+
+REP_TITLES = [
+    (-100, -61, "😈 Изгой",          "Тебя все боятся и ненавидят."),
+    ( -60, -31, "😤 Нарушитель",      "Репутация подмочена."),
+    ( -30,  -1, "😐 Подозрительный",  "Люди смотрят косо."),
+    (   0,   0, "😶 Никто",           "О тебе ещё не знают."),
+    (   1,  30, "🙂 Знакомый",        "Тебя начинают замечать."),
+    (  31,  60, "😊 Уважаемый",       "Тебя ценят в обществе."),
+    (  61,  99, "🌟 Авторитет",       "Тебе доверяют все вокруг."),
+    ( 100, 100, "👑 Легенда района",  "Имя знает весь Бишкек!"),
+]
+
+REP_SHOP_DISCOUNT = {
+    # репутация >= X -> скидка Y%
+    100: 20,
+    61:  10,
+    31:   5,
+    0:    0,
+    -30: -5,   # наценка
+    -60: -10,
+    -100:-20,
+}
+
+def get_rep_title(rep: int) -> tuple[str, str]:
+    for low, high, title, desc in REP_TITLES:
+        if low <= rep <= high:
+            return title, desc
+    return "😶 Никто", ""
+
+def get_rep_discount(rep: int) -> int:
+    """Возвращает % скидки (может быть отрицательным = наценка)."""
+    discount = 0
+    for threshold, value in sorted(REP_SHOP_DISCOUNT.items(), reverse=True):
+        if rep >= threshold:
+            discount = value
+            break
+    return discount
+
+def change_reputation(user_id: int, amount: int) -> tuple[int, int]:
+    """Меняет репутацию. Возвращает (старая, новая)."""
+    user    = get_user(user_id)
+    old_rep = user.get("reputation", 0)
+    new_rep = max(REP_MIN, min(REP_MAX, old_rep + amount))
+    update_user(user_id, reputation=new_rep)
+    return old_rep, new_rep
+
+def apply_rep_to_price(user: dict, price: int) -> int:
+    """Применяет скидку/наценку от репутации к цене."""
+    rep      = user.get("reputation", 0)
+    discount = get_rep_discount(rep)
+    return max(1, int(price * (1 - discount / 100)))
+
+@dp.message(Command("reputation"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("репутация", "rep")))
+async def cmd_reputation(message: Message):
+    uid  = message.from_user.id
+    user = get_user_safe(uid, message.from_user.username or message.from_user.full_name)
+    rep  = user.get("reputation", 0)
+
+    title, desc = get_rep_title(rep)
+    discount    = get_rep_discount(rep)
+
+    # Визуальная шкала
+    filled = int((rep - REP_MIN) / (REP_MAX - REP_MIN) * 20)
+    bar    = "█" * filled + "░" * (20 - filled)
+
+    if discount > 0:
+        discount_text = f"🏷 Скидка в магазине: <b>-{discount}%</b>"
+    elif discount < 0:
+        discount_text = f"💸 Наценка в магазине: <b>+{abs(discount)}%</b>"
+    else:
+        discount_text = "🏷 Скидка в магазине: нет"
+
+    await message.answer(
+        f"⭐ <b>Репутация</b>\n\n"
+        f"Статус: <b>{title}</b>\n"
+        f"<i>{desc}</i>\n\n"
+        f"[{bar}]\n"
+        f"Очки: <b>{rep}</b> / {REP_MAX}\n\n"
+        f"{discount_text}\n\n"
+        f"━━━ Как растёт репутация ━━━\n"
+        f"✅ Работа: +1\n"
+        f"✅ Победа в дуэли: +3\n"
+        f"✅ Выполнение квеста: +2\n"
+        f"❌ Поражение в дуэли: -2\n"
+        f"❌ Проигрыш на бирже: -1\n"
+        f"❌ Негативное событие на работе: -1"
+    )
+# =====================================================================
+# КОСТИ (ДАЙСЫ)
+# =====================================================================
+active_dice: dict[int, dict] = {}  # chat_id -> dice data
+
+@dp.message(
+    F.chat.type.in_({"group", "supergroup"}),
+    F.text.func(lambda t: t and t.strip().lower().startswith("кости "))
+)
+async def dice_challenge(message: Message):
+    chat_id      = message.chat.id
+    challenger_id   = message.from_user.id
+    challenger_name = message.from_user.full_name
+
+    if chat_id in active_dice:
+        await message.answer("🎲 В этом чате уже идёт игра в кости!")
+        return
+
+    parts = message.text.strip().split()
+    bet   = None
+    for p in reversed(parts):
+        if p.isdigit():
+            bet = int(p)
+            break
+
+    if not bet or bet <= 0:
+        await message.answer("❌ Укажи ставку: <code>кости @username 500</code>")
+        return
+
+    target_id   = None
+    target_name = None
+
+    if message.reply_to_message and message.reply_to_message.from_user:
+        ru = message.reply_to_message.from_user
+        if not ru.is_bot:
+            target_id   = ru.id
+            target_name = ru.full_name
+    else:
+        if message.entities:
+            for ent in message.entities:
+                if ent.type == "text_mention" and ent.user:
+                    target_id   = ent.user.id
+                    target_name = ent.user.full_name
+                    break
+                elif ent.type == "mention":
+                    uname = message.text[ent.offset:ent.offset + ent.length]
+                    try:
+                        cm = await bot.get_chat_member(chat_id, uname)
+                        target_id   = cm.user.id
+                        target_name = cm.user.full_name
+                    except Exception:
+                        pass
+                    break
+
+    if not target_id:
+        await message.answer("❌ Укажи игрока: <code>кости @username 500</code>")
+        return
+    if target_id == challenger_id:
+        await message.answer("❌ Нельзя играть с самим собой!")
+        return
+
+    challenger = get_user_safe(challenger_id)
+    if challenger["balance"] < bet:
+        await message.answer(f"❌ Недостаточно монет! Нужно {bet}, есть {challenger['balance']}")
+        return
+
+    register_user(target_id)
+    target = get_user(target_id)
+    if not target or target["balance"] < bet:
+        await message.answer(f"❌ У {target_name} недостаточно монет.")
+        return
+
+    active_dice[chat_id] = {
+        "challenger_id":   challenger_id,
+        "challenger_name": challenger_name,
+        "target_id":       target_id,
+        "target_name":     target_name,
+        "bet":             bet,
+        "accepted":        False,
+    }
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🎲 Принять", callback_data=f"dice_accept:{chat_id}:{target_id}")
+    builder.button(text="🏳️ Отказ",  callback_data=f"dice_decline:{chat_id}:{target_id}")
+    builder.adjust(2)
+
+    await message.answer(
+        f"🎲 <b>ВЫЗОВ НА КОСТИ!</b>\n\n"
+        f"🎯 {challenger_name} вызывает {target_name}\n"
+        f"💰 Ставка: <b>{bet}</b> монет\n\n"
+        f"Бросаем по 2 кубика — у кого сумма больше, тот выиграл!\n\n"
+        f"<a href='tg://user?id={target_id}'>{target_name}</a>, принимаешь?",
+        reply_markup=builder.as_markup()
+    )
+
+    async def auto_cancel():
+        await asyncio.sleep(60)
+        if chat_id in active_dice and not active_dice[chat_id]["accepted"]:
+            del active_dice[chat_id]
+            await message.answer(f"⏰ {target_name} не ответил. Игра отменена.")
+    asyncio.create_task(auto_cancel())
+
+
+@dp.callback_query(F.data.startswith("dice_accept:"))
+async def dice_accept(callback: CallbackQuery):
+    parts   = callback.data.split(":")
+    chat_id = int(parts[1])
+    tid     = int(parts[2])
+
+    if callback.from_user.id != tid:
+        await callback.answer("Это не твой вызов!", show_alert=True)
+        return
+
+    dice = active_dice.get(chat_id)
+    if not dice:
+        await callback.answer("Игра уже недействительна.", show_alert=True)
+        return
+
+    dice["accepted"] = True
+    await callback.answer()
+
+    c_id   = dice["challenger_id"]
+    c_name = dice["challenger_name"]
+    t_id   = dice["target_id"]
+    t_name = dice["target_name"]
+    bet    = dice["bet"]
+
+    challenger = get_user(c_id)
+    target     = get_user(t_id)
+
+    if challenger["balance"] < bet or target["balance"] < bet:
+        del active_dice[chat_id]
+        await callback.message.answer("❌ У одного из игроков не хватает монет. Игра отменена.")
+        return
+
+    # Бросаем кубики
+    c_dice = [random.randint(1, 6), random.randint(1, 6)]
+    t_dice = [random.randint(1, 6), random.randint(1, 6)]
+    c_sum  = sum(c_dice)
+    t_sum  = sum(t_dice)
+
+    await callback.message.answer(
+        f"🎲 <b>БРОСАЕМ КОСТИ!</b>\n\n"
+        f"🎯 {c_name}: [{c_dice[0]}] + [{c_dice[1]}] = <b>{c_sum}</b>\n"
+        f"🎯 {t_name}: [{t_dice[0]}] + [{t_dice[1]}] = <b>{t_sum}</b>"
+    )
+
+    await asyncio.sleep(2)
+
+    del active_dice[chat_id]
+
+    if c_sum == t_sum:
+        await callback.message.answer(
+            f"🤝 <b>НИЧЬЯ!</b> Оба выбросили {c_sum}.\n"
+            f"Монеты остаются у каждого."
+        )
+        return
+
+    if c_sum > t_sum:
+        winner_id, winner_name = c_id, c_name
+        loser_id,  loser_name  = t_id, t_name
+        winner_bal = challenger["balance"]
+        loser_bal  = target["balance"]
+    else:
+        winner_id, winner_name = t_id, t_name
+        loser_id,  loser_name  = c_id, c_name
+        winner_bal = target["balance"]
+        loser_bal  = challenger["balance"]
+
+    new_winner_bal = winner_bal + bet
+    new_loser_bal  = max(0, loser_bal - bet)
+    update_user(winner_id, balance=new_winner_bal)
+    update_user(loser_id,  balance=new_loser_bal)
+
+    change_reputation(winner_id, +2)
+    change_reputation(loser_id,  -1)
+
+    await callback.message.answer(
+        f"🏆 <b>ПОБЕДИТЕЛЬ — {winner_name}!</b>\n\n"
+        f"💰 +{bet} монет → баланс: {new_winner_bal}\n"
+        f"💸 -{bet} монет → баланс: {new_loser_bal}"
+    )
+
+
+@dp.callback_query(F.data.startswith("dice_decline:"))
+async def dice_decline(callback: CallbackQuery):
+    parts   = callback.data.split(":")
+    chat_id = int(parts[1])
+    tid     = int(parts[2])
+
+    if callback.from_user.id != tid:
+        await callback.answer("Это не твой вызов!", show_alert=True)
+        return
+
+    dice = active_dice.get(chat_id)
+    if not dice:
+        await callback.answer()
+        return
+
+    del active_dice[chat_id]
+    await callback.answer()
+    await callback.message.answer(
+        f"🏳️ <b>{dice['target_name']}</b> отказался. Трус! 🐔"
+    )
+
+
+# =====================================================================
+# СЛОТЫ
+# =====================================================================
+SLOT_SYMBOLS = ["🍋", "🍊", "🍇", "🍒", "⭐", "💎", "7️⃣"]
+SLOT_WEIGHTS  = [30,   25,   20,   15,   6,    3,    1  ]
+
+SLOT_PAYOUTS = {
+    # три одинаковых
+    "🍋🍋🍋": 2,
+    "🍊🍊🍊": 2,
+    "🍇🍇🍇": 3,
+    "🍒🍒🍒": 3,
+    "⭐⭐⭐": 5,
+    "💎💎💎": 10,
+    "7️⃣7️⃣7️⃣": 20,
+    # два одинаковых
+    "два": 0,   # возврат ставки
+}
+
+SLOT_MIN_BET = 50
+
+@dp.message(F.text.func(lambda t: t and t.strip().lower().startswith("слоты ")))
+async def cmd_slots(message: Message):
+    uid  = message.from_user.id
+    user = get_user_safe(uid, message.from_user.username or message.from_user.full_name)
+
+    parts = message.text.strip().split()
+    if len(parts) != 2 or not parts[1].isdigit():
+        await message.answer("❌ Формат: <code>слоты 200</code>")
+        return
+
+    bet = int(parts[1])
+    if bet < SLOT_MIN_BET:
+        await message.answer(f"❌ Минимальная ставка: <b>{SLOT_MIN_BET}</b> монет.")
+        return
+    if user["balance"] < bet:
+        await message.answer(
+            f"❌ Недостаточно монет.\n"
+            f"Ставка: <b>{bet}</b> | Баланс: <b>{user['balance']}</b>"
+        )
+        return
+
+    # Крутим барабаны
+    reels = random.choices(SLOT_SYMBOLS, weights=SLOT_WEIGHTS, k=3)
+    combo = "".join(reels)
+
+    # Определяем выигрыш
+    multiplier = 0
+    result_text = ""
+
+    if reels[0] == reels[1] == reels[2]:
+        multiplier  = SLOT_PAYOUTS.get(combo, 2)
+        result_text = f"🎉 <b>ТРИ ОДИНАКОВЫХ!</b> x{multiplier}"
+    elif reels[0] == reels[1] or reels[1] == reels[2] or reels[0] == reels[2]:
+        multiplier  = 1  # возврат ставки
+        result_text = "😐 <b>Два одинаковых — возврат ставки.</b>"
+    else:
+        multiplier  = 0
+        result_text = "😢 <b>Мимо! Ничего не совпало.</b>"
+
+    winnings    = bet * multiplier
+    profit      = winnings - bet
+    new_balance = user["balance"] - bet + winnings
+    update_user(uid, balance=new_balance)
+
+    if profit > 0:
+        change_reputation(uid, +1)
+        money_line = f"💰 Выигрыш: <b>+{profit}</b> монет"
+    elif profit == 0:
+        money_line = "💰 Ставка возвращена."
+    else:
+        change_reputation(uid, -1)
+        money_line = f"💸 Потеря: <b>{bet}</b> монет"
+
+    mention = message.from_user.mention_html()
+
+    await message.answer(
+        f"🎰 <b>СЛОТЫ</b> — {mention}\n\n"
+        f"┌─────────────┐\n"
+        f"│  {reels[0]}  {reels[1]}  {reels[2]}  │\n"
+        f"└─────────────┘\n\n"
+        f"{result_text}\n"
+        f"{money_line}\n"
+        f"📊 Баланс: <b>{new_balance}</b> монет"
+    )
+
+    update_quest_progress(uid, "slots")
+    check_and_grant_achievements(get_user(uid))
+# =====================================================================
+# СИСТЕМА ИВЕНТОВ
+# =====================================================================
+EVENTS = {
+    "double_xp": {
+        "name":        "⚡ Двойной опыт",
+        "description": "Весь опыт с работы x2!",
+        "duration_hours": 24,
+        "multiplier_xp":    2.0,
+        "multiplier_coins": 1.0,
+        "lucky_boost":      0,
+        "shop_discount":    0,
+        "emoji":       "⚡",
+    },
+    "double_coins": {
+        "name":        "💰 Золотая лихорадка",
+        "description": "Все монеты с работы x2!",
+        "duration_hours": 12,
+        "multiplier_xp":    1.0,
+        "multiplier_coins": 2.0,
+        "lucky_boost":      0,
+        "shop_discount":    0,
+        "emoji":       "💰",
+    },
+    "lucky_hour": {
+        "name":        "🍀 Час удачи",
+        "description": "Шанс позитивного события на работе 80%!",
+        "duration_hours": 2,
+        "multiplier_xp":    1.0,
+        "multiplier_coins": 1.0,
+        "lucky_boost":      80,
+        "shop_discount":    0,
+        "emoji":       "🍀",
+    },
+    "discount": {
+        "name":        "🛒 Распродажа",
+        "description": "Все товары в магазине -30%!",
+        "duration_hours": 6,
+        "multiplier_xp":    1.0,
+        "multiplier_coins": 1.0,
+        "lucky_boost":      0,
+        "shop_discount":    30,
+        "emoji":       "🛒",
+    },
+    "exam_week": {
+        "name":        "📝 Сессия в Манасе",
+        "description": "Опыт x3 но монеты x0.5! Тяжёлые времена.",
+        "duration_hours": 48,
+        "multiplier_xp":    3.0,
+        "multiplier_coins": 0.5,
+        "lucky_boost":      0,
+        "shop_discount":    0,
+        "emoji":       "📝",
+    },
+    "golden_weekend": {
+        "name":        "🌟 Золотые выходные",
+        "description": "Монеты x2 И опыт x2 весь уикенд!",
+        "duration_hours": 48,
+        "multiplier_xp":    2.0,
+        "multiplier_coins": 2.0,
+        "lucky_boost":      0,
+        "shop_discount":    0,
+        "emoji":       "🌟",
+    },
+    "manasday": {
+        "name":        "🏫 День КТУ Манас",
+        "description": "Праздник! Скидка 50% в магазине и удача x2!",
+        "duration_hours": 24,
+        "multiplier_xp":    1.5,
+        "multiplier_coins": 1.5,
+        "lucky_boost":      50,
+        "shop_discount":    50,
+        "emoji":       "🏫",
+    },
+}
+
+# Хранилище активного ивента в памяти
+current_event: dict | None = None
+registered_chats: set[int] = set()
+
+
+def load_chats_from_db():
+    """Загружает список чатов из БД."""
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT chat_id FROM event_chats")
+                rows = cur.fetchall()
+                for row in rows:
+                    registered_chats.add(row[0])
+    except Exception:
+        pass
+
+
+def save_chat(chat_id: int):
+    """Сохраняет chat_id в БД."""
+    registered_chats.add(chat_id)
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO event_chats (chat_id) VALUES (%s) ON CONFLICT DO NOTHING",
+                    (chat_id,)
+                )
+                conn.commit()
+    except Exception:
+        pass
+
+
+def get_active_event() -> dict | None:
+    """Возвращает активный ивент если он ещё не закончился."""
+    global current_event
+    if not current_event:
+        return None
+    if int(time.time()) > current_event["ends_at"]:
+        current_event = None
+        return None
+    return current_event
+
+
+def start_event(event_key: str) -> dict | None:
+    global current_event
+    event = EVENTS.get(event_key)
+    if not event:
+        return None
+    now      = int(time.time())
+    ends_at  = now + event["duration_hours"] * 3600
+    current_event = {
+        "key":      event_key,
+        "data":     event,
+        "started_at": now,
+        "ends_at":  ends_at,
+    }
+    return current_event
+
+
+def get_event_multipliers() -> tuple[float, float, int, int]:
+    """Возвращает (coins_mult, xp_mult, lucky_boost, shop_discount)."""
+    ev = get_active_event()
+    if not ev:
+        return 1.0, 1.0, 0, 0
+    d = ev["data"]
+    return (
+        d["multiplier_coins"],
+        d["multiplier_xp"],
+        d["lucky_boost"],
+        d["shop_discount"],
+    )
+
+
+async def broadcast_event_start(event_key: str):
+    """Рассылает объявление об ивенте всем чатам и пользователям."""
+    ev   = get_active_event()
+    if not ev:
+        return
+    data = ev["data"]
+    ends = ev["ends_at"]
+    from datetime import datetime
+    ends_str = datetime.fromtimestamp(ends).strftime("%H:%M %d.%m")
+
+    text = (
+        f"🎉 <b>НОВЫЙ ИВЕНТ!</b>\n\n"
+        f"{data['emoji']} <b>{data['name']}</b>\n"
+        f"{data['description']}\n\n"
+        f"⏳ До конца: <b>{data['duration_hours']} ч.</b> (до {ends_str})\n\n"
+        f"Успей воспользоваться!"
+    )
+
+    # Рассылка в группы
+    for chat_id in list(registered_chats):
+        try:
+            await bot.send_message(chat_id, text)
+        except Exception:
+            pass
+
+    # Рассылка всем пользователям в личку
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT user_id FROM users")
+                rows = cur.fetchall()
+        for row in rows:
+            try:
+                await bot.send_message(row[0], text)
+                await asyncio.sleep(0.05)  # антифлуд
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+async def broadcast_event_end(event_name: str):
+    """Рассылает объявление о конце ивента."""
+    text = f"⏰ <b>Ивент завершён!</b>\n\n«{event_name}» закончился.\nСледи за новыми событиями!"
+
+    for chat_id in list(registered_chats):
+        try:
+            await bot.send_message(chat_id, text)
+        except Exception:
+            pass
+
+
+# ── Автоматические ивенты по расписанию ──────────────────────────────
+# Каждый понедельник — день карьериста
+# Каждую пятницу — золотая лихорадка
+# Случайно раз в 8-24 часа с шансом 25%
+
+async def auto_event_scheduler():
+    """Запускается при старте бота и периодически проверяет расписание."""
+    from datetime import datetime
+    await asyncio.sleep(10)  # ждём старта бота
+
+    while True:
+        now     = datetime.now()
+        weekday = now.weekday()  # 0=пн, 4=пт, 5=сб, 6=вс
+
+        ev = get_active_event()
+
+        if not ev:
+            # Понедельник → двойной XP
+            if weekday == 0 and now.hour == 9:
+                event_key = "double_xp"
+                start_event(event_key)
+                await broadcast_event_start(event_key)
+
+            # Пятница → золотая лихорадка
+            elif weekday == 4 and now.hour == 18:
+                event_key = "double_coins"
+                start_event(event_key)
+                await broadcast_event_start(event_key)
+
+            # Выходные → золотые выходные
+            elif weekday == 5 and now.hour == 10:
+                event_key = "golden_weekend"
+                start_event(event_key)
+                await broadcast_event_start(event_key)
+
+            # Случайный ивент с шансом 20% каждые 6 часов
+            elif now.hour in (0, 6, 12, 18) and now.minute < 5:
+                if random.random() < 0.20:
+                    random_events = ["lucky_hour", "discount", "exam_week", "manasday"]
+                    event_key     = random.choice(random_events)
+                    start_event(event_key)
+                    await broadcast_event_start(event_key)
+
+        await asyncio.sleep(300)  # проверяем каждые 5 минут
+
+
+# ── Команды ивентов ───────────────────────────────────────────────────
+@dp.message(Command("start_event"))
+async def cmd_start_event(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+
+    parts = message.text.strip().split()
+    if len(parts) < 2:
+        keys = "\n".join(f"  <code>{k}</code> — {v['name']}" for k, v in EVENTS.items())
+        await message.answer(
+            f"❌ Укажи ключ ивента:\n{keys}\n\n"
+            f"Пример: <code>/start_event double_xp</code>"
+        )
+        return
+
+    event_key = parts[1].lower()
+    if event_key not in EVENTS:
+        await message.answer(f"❌ Ивент <code>{event_key}</code> не найден.")
+        return
+
+    ev = get_active_event()
+    if ev:
+        await message.answer(
+            f"⚠️ Уже идёт ивент: <b>{ev['data']['name']}</b>\n"
+            f"Сначала завершите его: /end_event"
+        )
+        return
+
+    start_event(event_key)
+    await message.answer(f"✅ Ивент <b>{EVENTS[event_key]['name']}</b> запущен! Рассылаю...")
+    await broadcast_event_start(event_key)
+
+
+@dp.message(Command("end_event"))
+async def cmd_end_event(message: Message):
+    global current_event
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+
+    ev = get_active_event()
+    if not ev:
+        await message.answer("❌ Нет активного ивента.")
+        return
+
+    name = ev["data"]["name"]
+    current_event = None
+    await message.answer(f"✅ Ивент <b>{name}</b> завершён.")
+    await broadcast_event_end(name)
+
+
+@dp.message(Command("current_event"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("ивент", "событие", "event")))
+async def cmd_current_event(message: Message):
+    ev = get_active_event()
+    if not ev:
+        await message.answer(
+            "😴 Сейчас активных ивентов нет.\n"
+            "Следи за объявлениями!"
+        )
+        return
+
+    from datetime import datetime
+    data     = ev["data"]
+    ends_str = datetime.fromtimestamp(ev["ends_at"]).strftime("%H:%M %d.%m")
+    remaining = max(0, ev["ends_at"] - int(time.time()))
+    hours     = remaining // 3600
+    minutes   = (remaining % 3600) // 60
+
+    bonuses = []
+    if data["multiplier_coins"] != 1.0:
+        bonuses.append(f"💰 Монеты с работы: x{data['multiplier_coins']}")
+    if data["multiplier_xp"] != 1.0:
+        bonuses.append(f"✨ Опыт с работы: x{data['multiplier_xp']}")
+    if data["lucky_boost"] > 0:
+        bonuses.append(f"🍀 Шанс удачи на работе: {data['lucky_boost']}%")
+    if data["shop_discount"] > 0:
+        bonuses.append(f"🛒 Скидка в магазине: -{data['shop_discount']}%")
+
+    bonuses_text = "\n".join(f"  • {b}" for b in bonuses)
+
+    await message.answer(
+        f"🎉 <b>Активный ивент!</b>\n\n"
+        f"{data['emoji']} <b>{data['name']}</b>\n"
+        f"{data['description']}\n\n"
+        f"🎁 <b>Бонусы:</b>\n{bonuses_text}\n\n"
+        f"⏳ Осталось: <b>{hours}ч {minutes}мин</b> (до {ends_str})"
+    )
+# =====================================================================
 # ТОЧКА ВХОДА
 # =====================================================================
 async def main():
     init_db()
+    load_chats_from_db()
+    asyncio.create_task(auto_event_scheduler())
     print("✅ PostgreSQL БД инициализирована. Бот КТУ Манас запускается...")
     await dp.start_polling(bot)
 
