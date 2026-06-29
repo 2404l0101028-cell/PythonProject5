@@ -947,22 +947,24 @@ def init_db():
                         )
                         """)
 
-            # Добавляем колонки если их нет (для старых БД)
             for col, definition in [
-                ("username",     "TEXT DEFAULT ''"),
+                ("username", "TEXT DEFAULT ''"),
                 ("achievements", "TEXT DEFAULT ''"),
                 ("pet_id", "TEXT DEFAULT ''"),
                 ("pet_bonus", "INTEGER DEFAULT 0"),
                 ("reputation", "INTEGER DEFAULT 0"),
                 ("active_event", "TEXT DEFAULT ''"),
                 ("event_ends_at", "INTEGER DEFAULT 0"),
-                ("pet_collection", "TEXT DEFAULT ''"),  # JSON строка {pet_id: bonus, ...}
-                ("active_pet", "TEXT DEFAULT ''"),  # ключ активного пета
+                ("pet_collection", "TEXT DEFAULT ''"),
+                ("active_pet", "TEXT DEFAULT ''"),
             ]:
                 try:
-                    cur.execute(f"ALTER TABLE users ADD COLUMN {col} {definition}")
+                    with get_conn() as conn:  # <-- отдельное соединение на каждый ALTER
+                        with conn.cursor() as cur:
+                            cur.execute(f"ALTER TABLE users ADD COLUMN {col} {definition}")
+                        conn.commit()
                 except Exception:
-                    pass
+                    pass  # колонка уже существует — ок
             conn.commit()
 
 def register_user(user_id: int, username: str = ""):
