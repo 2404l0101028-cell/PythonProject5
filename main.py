@@ -583,6 +583,42 @@ CONSUMABLES = {
         "hp": 80, "energy": 0,
         "description": "Серьёзное лечение.",
     },
+    "shawarma": {
+        "name": "🌯 Шаурма из Джала",
+        "price": 80,
+        "hp": 20, "energy": 20,
+        "description": "Классика КТУ. Восстанавливает и HP и энергию.",
+    },
+    "plov": {
+        "name": "🍚 Плов",
+        "price": 150,
+        "hp": 50, "energy": 30,
+        "description": "Настоящий кыргызский плов. Сытно и вкусно.",
+    },
+    "simit": {
+        "name": "🥨 Симит",
+        "price": 30,
+        "hp": 10, "energy": 10,
+        "description": "Турецкий бублик из коридора Манаса.",
+    },
+    "chorbo": {
+        "name": "🍲 Чорбо",
+        "price": 120,
+        "hp": 60, "energy": 0,
+        "description": "Наваристый суп из столовой. Лечит хорошо.",
+    },
+    "tea": {
+        "name": "🍵 Турецкий чай",
+        "price": 25,
+        "hp": 0, "energy": 15,
+        "description": "Маленький стакан, большая энергия.",
+    },
+    "lagman": {
+        "name": "🍜 Лагман",
+        "price": 180,
+        "hp": 40, "energy": 60,
+        "description": "Густая лапша. Надолго заряжает.",
+    },
     "caffeine": {
         "name": "💊 Кофеин в таблетках",
         "price": 400,
@@ -920,6 +956,8 @@ def init_db():
                 ("reputation", "INTEGER DEFAULT 0"),
                 ("active_event", "TEXT DEFAULT ''"),
                 ("event_ends_at", "INTEGER DEFAULT 0"),
+                ("pet_collection", "TEXT DEFAULT ''"),  # JSON строка {pet_id: bonus, ...}
+                ("active_pet", "TEXT DEFAULT ''"),  # ключ активного пета
             ]:
                 try:
                     cur.execute(f"ALTER TABLE users ADD COLUMN {col} {definition}")
@@ -1255,7 +1293,8 @@ def do_work(user: dict) -> tuple[bool, str]:
     event_line = ""
     event_prefix = ""
     if random.random() < 0.20:
-        luck = user.get("luck", 1)
+        _, _, pet_luck = get_pet_bonus(user)
+        luck = user.get("luck", 1) + pet_luck
         _, _, ev_lucky, _ = get_event_multipliers()
         pos_chance = min(luck * 4 + ev_lucky, 95) / 100
         branch_events = WORK_EVENTS.get(branch, {}) if branch else {}
@@ -1439,38 +1478,33 @@ def do_train(user: dict, stat: str) -> tuple[bool, str]:
 # ЛОГИКА: МАГАЗИН
 # =====================================================================
 def build_shop_text(user: dict) -> str:
-    lines = ["🛒 <b>Магазин</b>\n", "━━━ 🎒 Снаряжение (постоянные) ━━━"]
-    for item in SHOP_ITEMS.values():
-        owned = "✅ куплено" if user.get(item["flag"]) else f"{item['price']} монет"
-        lines.append(f"{item['name']} — <b>{owned}</b>\n  <i>{item['description']}</i>")
-
-    lines.append("\n━━━ 🧃 Расходники ━━━")
-    for item in CONSUMABLES.values():
-        effects = []
-        if item["hp"]     > 0: effects.append(f"+{min(item['hp'], 9999)} HP")
-        if item["energy"] > 0: effects.append(f"+{min(item['energy'], 9999)} ⚡")
-        if item["hp"] >= 9999 and item["energy"] >= 9999:
-            effects = ["полное восстановление"]
-        lines.append(
-            f"{item['name']} — <b>{item['price']} монет</b>  "
-            f"({', '.join(effects)})\n  <i>{item['description']}</i>"
-        )
-    lines.append(f"\n💰 Твой баланс: <b>{user['balance']}</b> монет")
-    return "\n".join(lines)
-
-
+    return (
+        "🛒 <b>Магазин</b>\n\n"
+        "🎒 <b>Снаряжение</b> — предметы для прокачки профессий\n"
+        "🍔 <b>Еда и расходники</b> — восстановление HP и энергии\n\n"
+        f"💰 Твой баланс: <b>{user['balance']}</b> монет\n\n"
+        "Выбери категорию:"
+    )
 def get_shop_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    builder.button(text="🎒 Снаряжение", callback_data="shop_cat:gear")
+    builder.button(text="🍔 Еда и расходники", callback_data="shop_cat:food")
+    builder.adjust(2)
+    return builder.as_markup()
+
+def get_shop_gear_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
     for key, item in SHOP_ITEMS.items():
-        builder.button(
-            text=f"{item['name']} — {item['price']} монет",
-            callback_data=ShopCallback(item_key=key).pack()
-        )
+        builder.button(text=f"{item['name']} — {item['price']} монет", callback_data=ShopCallback(item_key=key).pack())
+    builder.button(text="◀ Назад", callback_data="shop_back")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def get_shop_food_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
     for key, item in CONSUMABLES.items():
-        builder.button(
-            text=f"{item['name']} — {item['price']} монет",
-            callback_data=f"consume:{key}"
-        )
+        builder.button(text=f"{item['name']} — {item['price']} монет", callback_data=f"consume:{key}")
+    builder.button(text="◀ Назад", callback_data="shop_back")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -2446,68 +2480,135 @@ async def bunker_cancel(message: Message):
 # =====================================================================
 # ТЕКСТ ПОМОЩИ
 # =====================================================================
-HELP_TEXT = (
-    "📋 <b>Все команды игры «МанасWorker»</b>\n\n"
-    "━━━ 👤 Персонаж ━━━\n"
-    "<b>Профиль</b> — посмотреть свой профиль, уровень, баланс, характеристики\n\n"
-    "━━━ 💼 Работа ━━━\n"
-    "<b>Профессии</b> — меню профессий, выбор и повышение грейда\n"
-    "<b>Работа</b> — отработать смену и получить монеты и XP\n\n"
-    "━━━ 💪 Развитие ━━━\n"
-    "<b>Тренировки</b> — прокачать Интеллект или Выносливость\n"
-    "<b>Навыки</b> — улучшить навыки (Коммуникация, Вождение, Харизма и др.)\n\n"
-    "━━━ 🛒 Магазин ━━━\n"
-    "<b>Магазин</b> — купить снаряжение для грейдов или расходники (HP/Энергия)\n\n"
-    "━━━ 📈 Биржа ━━━\n"
-    "<b>акция ап [сумма]</b> — поставить на рост рынка\n"
-    "<b>акция давн [сумма]</b> — поставить на падение рынка\n"
-    "<b>акция нейтрал [сумма]</b> — поставить на флэт\n"
-    f"  <i>Мин. ставка: {STOCK_MIN_BET} монет | Выигрыш x2 | Шанс нейтрала ~5%</i>\n\n"
-    "━━━ 🏗 Бункер ━━━\n"
-    "<b>бункер создать</b> — создать игру (выбор режима кнопками)\n"
-    "<b>бункер создать манас</b> — режим «КТУ Манас»\n"
-    "<b>бункер создать обычный</b> — классический режим\n"
-    "<b>+</b> — войти в игру во время регистрации\n"
-    "<b>бункер старт</b> — начать игру (только создатель)\n"
-    "<b>открыть [характеристика]</b> — раскрыть черту персонажа в чате\n"
-    "<b>бункер голосование</b> — запустить голосование (создатель)\n"
-    "<b>кик @username</b> — проголосовать против игрока\n"
-    "<b>бункер итог</b> — подвести итоги голосования (создатель)\n"
-    "<b>бункер статус</b> — состояние текущей игры\n"
-    "<b>бункер отмена</b> — отменить игру (только создатель)\n\n"
-    "━━━ 🃏 Покер ━━━\n"
-    "<b>покер создать</b> — создать стол (макс. 6 игроков)\n"
-    "<b>+</b> — сесть за стол во время регистрации\n"
-    "<b>покер старт</b> — начать игру (создатель)\n"
-    "<b>чек</b> / <b>колл</b> / <b>рейз [сумма]</b> / <b>фолд</b> / <b>ва-банк</b>\n"
-    "<b>покер стол</b> — показать состояние стола\n"
-    "<b>покер отмена</b> — отменить игру (создатель)\n\n"
-    "━━━ 💸 Переводы ━━━\n"
-    "<b>перевод @username 500</b> — отправить монеты игроку\n"
-    "<b>перевод 500</b> — перевод в ответ на сообщение игрока\n\n"
-    "━━━ 🏅 Достижения ━━━\n"
-    "/achievements или достижения — список всех достижений\n\n"
-    "━━━ 🏆 Рейтинг ━━━\n"
-    "/top — топ-10 богачей\n"
-    "/my_place — твоё место в рейтинге\n\n"
-    "━━━ ⚔️ Дуэли ━━━\n"
-    "<b>дуэль @username 500</b> — вызвать игрока на дуэль\n"
-    "<i>Победитель определяется по характеристикам + удача. Ставка переходит победителю.</i>\n\n"
-    "━━━ 🐾 Питомцы ━━━\n"
-    "<b>гача</b> или /gacha — крутить гачу и управлять питомцем\n"
-    f"<i>Цена броска: 2000 монет. Дубликат = бонус питомца растёт!</i>\n\n"
-    "━━━ 🎲 Мини-игры ━━━\n"
-    "<b>кости @username 500</b> — бросить кости с игроком\n"
-    "<b>слоты 200</b> — покрутить слоты\n"
-    f"  <i>Мин. ставка слотов: 50 монет</i>\n"
-    "  🍒🍒🍒 x3 | ⭐⭐⭐ x5 | 💎💎💎 x10 | 7️⃣7️⃣7️⃣ x20\n\n"
-    "━━━ 🎉 Ивенты ━━━\n"
-    "<b>ивент</b> или /current_event — посмотреть активный ивент\n"
-    "<i>Ивенты запускаются автоматически и объявляются всем игрокам!</i>\n\n"
-    "━━━ ℹ️ Прочее ━━━\n"
-    "<b>Команда</b> — показать это меню помощи\n\n"
-    "💡 <i>Все команды работают без учёта регистра</i>"
-)
+HELP_CATEGORIES = {
+    "main": {
+        "label": "🏠 Главное меню помощи",
+        "text": (
+            "📋 <b>Команды МанасWorker</b>\n\n"
+            "Выбери раздел:"
+        ),
+    },
+    "character": {
+        "label": "👤 Персонаж и развитие",
+        "text": (
+            "👤 <b>Персонаж и развитие</b>\n\n"
+            "<b>Профиль</b> — уровень, баланс, характеристики\n"
+            "<b>Профессии</b> — выбор и повышение грейда\n"
+            "<b>Тренировки</b> — прокачать Интеллект/Выносливость\n"
+            "<b>Навыки</b> — Коммуникация, Вождение, Харизма и др.\n"
+            "<b>Магазин</b> — снаряжение и еда\n"
+            "<b>Работа</b> — отработать смену (+монеты, +XP)\n\n"
+            "📊 Репутация влияет на скидки в магазине!\n"
+            "🐾 Питомцы дают бонусы к монетам, XP и удаче."
+        ),
+    },
+    "economy": {
+        "label": "💰 Экономика и биржа",
+        "text": (
+            "💰 <b>Экономика</b>\n\n"
+            "<b>акция ап [сумма]</b> — ставка на рост рынка\n"
+            "<b>акция давн [сумма]</b> — ставка на падение\n"
+            "<b>акция нейтрал [сумма]</b> — ставка на флэт\n"
+            f"  Мин. ставка: {STOCK_MIN_BET} монет\n\n"
+            "<b>перевод @username 500</b> — перевести монеты\n"
+            "<b>перевод 500</b> — перевод ответом на сообщение\n\n"
+            "<b>репутация</b> — посмотреть репутацию и скидки\n"
+            "/top — топ-10 богачей\n"
+            "/my_place — твоё место в рейтинге"
+        ),
+    },
+    "games": {
+        "label": "🎮 Игры и дуэли",
+        "text": (
+            "🎮 <b>Игры</b>\n\n"
+            "<b>дуэль @username 500</b> — дуэль на монеты\n"
+            "<b>кости @username 500</b> — бросок кубиков\n"
+            f"<b>слоты [сумма]</b> — слоты (мин. 50 монет)\n"
+            f"<b>блекджек [сумма]</b> — блекджек (мин. 50 монет)\n"
+            "  🍒🍒🍒 x3 | ⭐⭐⭐ x5 | 💎💎💎 x10 | 7️⃣7️⃣7️⃣ x20\n\n"
+            "<b>акция ап/давн/нейтрал [сумма]</b> — биржа\n\n"
+            "📈 Покер:\n"
+            "<b>покер создать</b> / <b>покер старт</b>\n"
+            "<b>чек</b> / <b>колл</b> / <b>рейз [сумма]</b> / <b>фолд</b> / <b>ва-банк</b>"
+        ),
+    },
+    "bunker": {
+        "label": "🏗 Бункер",
+        "text": (
+            "🏗 <b>Бункер</b>\n\n"
+            "<b>бункер создать</b> — создать игру\n"
+            "<b>бункер создать манас</b> — режим КТУ\n"
+            "<b>бункер создать обычный</b> — апокалипсис\n"
+            "<b>+</b> — войти в игру\n"
+            "<b>бункер старт</b> — начать (создатель)\n"
+            "<b>открыть [характеристика]</b> — раскрыть черту\n"
+            "<b>бункер голосование</b> — запустить голосование\n"
+            "<b>кик @username</b> — голосовать против игрока\n"
+            "<b>бункер итог</b> — подвести итоги\n"
+            "<b>бункер статус</b> — состояние игры\n"
+            "<b>бункер отмена</b> — отменить игру"
+        ),
+    },
+    "pets": {
+        "label": "🐾 Питомцы и квесты",
+        "text": (
+            "🐾 <b>Питомцы</b>\n\n"
+            "<b>гача</b> или /gacha — открыть меню гачи\n"
+            f"  Обычная: 2000 монет\n"
+            f"  Премиум: 3500 монет (выше шанс редких)\n"
+            "  Дубликат = бонус питомца +1% (макс +20%)\n"
+            "  Питомцы хранятся в коллекции!\n\n"
+            "📋 <b>Квесты</b>\n\n"
+            "<b>квесты</b> или /quests — ежедневные задания\n"
+            "  Обновляются каждый день, дают монеты и XP\n\n"
+            "🏅 <b>Достижения</b>\n\n"
+            "/achievements или <b>достижения</b> — список ачивок\n\n"
+            "🎉 <b>Ивенты</b>\n\n"
+            "<b>ивент</b> — посмотреть активный ивент"
+        ),
+    },
+}
+
+
+@dp.message(F.text.func(lambda t: _is(t, "команда", "команды", "помощь", "help")))
+async def txt_help_any(message: Message):
+    await _send_help_main(message)
+
+@dp.message(Command("help"))
+async def cmd_help(message: Message):
+    await _send_help_main(message)
+
+async def _send_help_main(message: Message):
+    builder = InlineKeyboardBuilder()
+    for key, cat in HELP_CATEGORIES.items():
+        if key == "main":
+            continue
+        builder.button(text=cat["label"], callback_data=f"help_cat:{key}")
+    builder.adjust(1)
+    await message.answer(HELP_CATEGORIES["main"]["text"], reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data.startswith("help_cat:"))
+async def callback_help_cat(callback: CallbackQuery):
+    key = callback.data.split(":")[1]
+    cat = HELP_CATEGORIES.get(key)
+    if not cat:
+        await callback.answer()
+        return
+    builder = InlineKeyboardBuilder()
+    builder.button(text="◀ Назад", callback_data="help_back")
+    await callback.answer()
+    await callback.message.edit_text(cat["text"], reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data == "help_back")
+async def callback_help_back(callback: CallbackQuery):
+    builder = InlineKeyboardBuilder()
+    for key, cat in HELP_CATEGORIES.items():
+        if key == "main":
+            continue
+        builder.button(text=cat["label"], callback_data=f"help_cat:{key}")
+    builder.adjust(1)
+    await callback.answer()
+    await callback.message.edit_text(HELP_CATEGORIES["main"]["text"], reply_markup=builder.as_markup())
 
 # =====================================================================
 # МОДУЛЬ «ТЕХАССКИЙ ПОКЕР»
@@ -3510,12 +3611,6 @@ async def txt_shop_group(message: Message):
         f"{message.from_user.mention_html()}\n{build_shop_text(user)}",
         reply_markup=get_shop_keyboard()
     )
-
-@dp.message(F.chat.type.in_({"group", "supergroup"}),
-            F.text.func(lambda t: t and _is(t, "команда", "команды", "помощь", "help")))
-async def txt_help_group(message: Message):
-    await message.answer(HELP_TEXT)
-
 @dp.message(F.chat.type.in_({"group", "supergroup"}),
             F.text.func(lambda t: t and t.strip().lower().startswith("акция ")))
 async def txt_stock_group(message: Message):
@@ -3556,13 +3651,6 @@ async def txt_stock_private(message: Message):
         return
     _, text = do_stock_bet(user, outcome_input, bet)
     await message.answer(text)
-
-@dp.message(F.chat.type == "private",
-            F.text.func(lambda t: _is(t, "команда", "команды", "помощь", "help")))
-async def txt_help_private(message: Message):
-    await message.answer(HELP_TEXT)
-
-
 # =====================================================================
 # CALLBACKS
 # =====================================================================
@@ -3651,6 +3739,36 @@ async def callback_shop_buy(callback: CallbackQuery, callback_data: ShopCallback
             reply_markup=get_shop_keyboard()
         )
 
+@dp.callback_query(F.data == "shop_back")
+async def callback_shop_back(callback: CallbackQuery):
+    user = get_user_safe(callback.from_user.id)
+    await callback.answer()
+    await callback.message.edit_text(build_shop_text(user), reply_markup=get_shop_keyboard())
+
+@dp.callback_query(F.data == "shop_cat:gear")
+async def callback_shop_gear(callback: CallbackQuery):
+    user  = get_user_safe(callback.from_user.id)
+    lines = ["🎒 <b>Снаряжение</b>\n"]
+    for item in SHOP_ITEMS.values():
+        owned = "✅ куплено" if user.get(item["flag"]) else f"{item['price']} монет"
+        lines.append(f"{item['name']} — <b>{owned}</b>\n  <i>{item['description']}</i>")
+    lines.append(f"\n💰 Баланс: <b>{user['balance']}</b> монет")
+    await callback.answer()
+    await callback.message.edit_text("\n".join(lines), reply_markup=get_shop_gear_keyboard())
+
+@dp.callback_query(F.data == "shop_cat:food")
+async def callback_shop_food(callback: CallbackQuery):
+    user  = get_user_safe(callback.from_user.id)
+    lines = ["🍔 <b>Еда и расходники</b>\n"]
+    for item in CONSUMABLES.values():
+        effects = []
+        if item["hp"] > 0: effects.append(f"+{min(item['hp'],9999)} HP")
+        if item["energy"] > 0: effects.append(f"+{min(item['energy'],9999)} ⚡")
+        if item["hp"] >= 9999 and item["energy"] >= 9999: effects = ["полное восстановление"]
+        lines.append(f"{item['name']} — <b>{item['price']} монет</b>  ({', '.join(effects)})\n  <i>{item['description']}</i>")
+    lines.append(f"\n💰 Баланс: <b>{user['balance']}</b> монет")
+    await callback.answer()
+    await callback.message.edit_text("\n".join(lines), reply_markup=get_shop_food_keyboard())
 
 @dp.callback_query(F.data.startswith("consume:"))
 async def callback_use_consumable(callback: CallbackQuery):
@@ -4262,144 +4380,186 @@ async def cmd_quests(message: Message):
 
     await message.answer("\n\n".join(lines))
 
-# =====================================================================
-# ПИТОМЦЫ (ГАЧА)
-# =====================================================================
+PET_GACHA_PRICE = 2000
+PET_GACHA_PREMIUM_PRICE = 5000  # новая премиум гача
+
 PETS = {
     "cat": {
-        "name":        "🐱 Котик",
-        "rarity":      "common",
-        "rarity_label":"⚪ Обычный",
-        "bonus_type":  "coins",
-        "bonus_label": "монеты с работы",
-        "base_bonus":  3,
+        "name": "🐱 Котик", "rarity": "common", "rarity_label": "⚪ Обычный",
+        "bonus_type": "coins", "bonus_label": "монеты с работы",
+        "base_bonus": 3, "luck_bonus": 0,
         "description": "Мурлычет и приносит монетки.",
-        "weight":      40,
+        "weight": 40, "weight_premium": 25,
     },
     "dog": {
-        "name":        "🐶 Пёсик",
-        "rarity":      "common",
-        "rarity_label":"⚪ Обычный",
-        "bonus_type":  "coins",
-        "bonus_label": "монеты с работы",
-        "base_bonus":  3,
+        "name": "🐶 Пёсик", "rarity": "common", "rarity_label": "⚪ Обычный",
+        "bonus_type": "coins", "bonus_label": "монеты с работы",
+        "base_bonus": 3, "luck_bonus": 0,
         "description": "Верный друг, любит монеты.",
-        "weight":      40,
+        "weight": 40, "weight_premium": 25,
+    },
+    "hamster": {
+        "name": "🐹 Хомяк", "rarity": "common", "rarity_label": "⚪ Обычный",
+        "bonus_type": "xp", "bonus_label": "опыт с работы",
+        "base_bonus": 3, "luck_bonus": 0,
+        "description": "Запасливый зверёк, копит опыт.",
+        "weight": 35, "weight_premium": 20,
+    },
+    "rabbit": {
+        "name": "🐰 Кролик", "rarity": "common", "rarity_label": "⚪ Обычный",
+        "bonus_type": "luck", "bonus_label": "удача",
+        "base_bonus": 2, "luck_bonus": 2,
+        "description": "Приносит удачу на работе.",
+        "weight": 30, "weight_premium": 18,
     },
     "fox": {
-        "name":        "🦊 Лисичка",
-        "rarity":      "rare",
-        "rarity_label":"🔵 Редкий",
-        "bonus_type":  "xp",
-        "bonus_label": "опыт с работы",
-        "base_bonus":  5,
+        "name": "🦊 Лисичка", "rarity": "rare", "rarity_label": "🔵 Редкий",
+        "bonus_type": "xp", "bonus_label": "опыт с работы",
+        "base_bonus": 5, "luck_bonus": 1,
         "description": "Хитрая и быстро учится.",
-        "weight":      25,
+        "weight": 25, "weight_premium": 22,
     },
     "owl": {
-        "name":        "🦉 Сова",
-        "rarity":      "rare",
-        "rarity_label":"🔵 Редкий",
-        "bonus_type":  "xp",
-        "bonus_label": "опыт с работы",
-        "base_bonus":  5,
+        "name": "🦉 Сова", "rarity": "rare", "rarity_label": "🔵 Редкий",
+        "bonus_type": "xp", "bonus_label": "опыт с работы",
+        "base_bonus": 5, "luck_bonus": 1,
         "description": "Мудрая птица, даёт опыт.",
-        "weight":      25,
+        "weight": 25, "weight_premium": 22,
+    },
+    "wolf": {
+        "name": "🐺 Волк", "rarity": "rare", "rarity_label": "🔵 Редкий",
+        "bonus_type": "coins", "bonus_label": "монеты с работы",
+        "base_bonus": 6, "luck_bonus": 1,
+        "description": "Хищник. Хорошо зарабатывает.",
+        "weight": 20, "weight_premium": 18,
+    },
+    "panda": {
+        "name": "🐼 Панда", "rarity": "rare", "rarity_label": "🔵 Редкий",
+        "bonus_type": "luck", "bonus_label": "удача",
+        "base_bonus": 4, "luck_bonus": 4,
+        "description": "Спокойная и удачливая.",
+        "weight": 18, "weight_premium": 16,
+    },
+    "parrot": {
+        "name": "🦜 Попугай", "rarity": "rare", "rarity_label": "🔵 Редкий",
+        "bonus_type": "both", "bonus_label": "монеты и опыт",
+        "base_bonus": 4, "luck_bonus": 0,
+        "description": "Болтун, но полезный.",
+        "weight": 18, "weight_premium": 15,
     },
     "dragon": {
-        "name":        "🐉 Дракончик",
-        "rarity":      "epic",
-        "rarity_label":"🟣 Эпик",
-        "bonus_type":  "coins",
-        "bonus_label": "монеты с работы",
-        "base_bonus":  10,
+        "name": "🐉 Дракончик", "rarity": "epic", "rarity_label": "🟣 Эпик",
+        "bonus_type": "coins", "bonus_label": "монеты с работы",
+        "base_bonus": 10, "luck_bonus": 2,
         "description": "Огненный зверь, богатство само идёт.",
-        "weight":      10,
+        "weight": 10, "weight_premium": 14,
     },
     "unicorn": {
-        "name":        "🦄 Единорог",
-        "rarity":      "epic",
-        "rarity_label":"🟣 Эпик",
-        "bonus_type":  "xp",
-        "bonus_label": "опыт с работы",
-        "base_bonus":  10,
+        "name": "🦄 Единорог", "rarity": "epic", "rarity_label": "🟣 Эпик",
+        "bonus_type": "xp", "bonus_label": "опыт с работы",
+        "base_bonus": 10, "luck_bonus": 2,
         "description": "Магическое существо, опыт x бонус.",
-        "weight":      10,
+        "weight": 10, "weight_premium": 14,
+    },
+    "tiger": {
+        "name": "🐯 Тигр", "rarity": "epic", "rarity_label": "🟣 Эпик",
+        "bonus_type": "both", "bonus_label": "монеты и опыт",
+        "base_bonus": 8, "luck_bonus": 3,
+        "description": "Мощный хищник. Всё по максимуму.",
+        "weight": 8, "weight_premium": 12,
+    },
+    "snow_leopard": {
+        "name": "🐆 Снежный барс", "rarity": "epic", "rarity_label": "🟣 Эпик",
+        "bonus_type": "luck", "bonus_label": "удача",
+        "base_bonus": 8, "luck_bonus": 8,
+        "description": "Символ Кыргызстана. Удача зашкаливает.",
+        "weight": 7, "weight_premium": 12,
     },
     "phoenix": {
-        "name":        "🔥 Феникс",
-        "rarity":      "legendary",
-        "rarity_label":"🟡 Легендарный",
-        "bonus_type":  "both",
-        "bonus_label": "монеты И опыт",
-        "base_bonus":  15,
+        "name": "🔥 Феникс", "rarity": "legendary", "rarity_label": "🟡 Легендарный",
+        "bonus_type": "both", "bonus_label": "монеты И опыт",
+        "base_bonus": 15, "luck_bonus": 5,
         "description": "Легендарная птица. Бонус ко всему.",
-        "weight":      3,
+        "weight": 3, "weight_premium": 8,
     },
     "manul": {
-        "name":        "🐈 Манул",
-        "rarity":      "legendary",
-        "rarity_label":"🟡 Легендарный",
-        "bonus_type":  "both",
-        "bonus_label": "монеты И опыт",
-        "base_bonus":  15,
+        "name": "🐈 Манул", "rarity": "legendary", "rarity_label": "🟡 Легендарный",
+        "bonus_type": "both", "bonus_label": "монеты И опыт",
+        "base_bonus": 15, "luck_bonus": 5,
         "description": "Редчайший степной кот. Приносит удачу.",
-        "weight":      2,
+        "weight": 2, "weight_premium": 7,
+    },
+    "golden_dragon": {
+        "name": "✨ Золотой дракон", "rarity": "legendary", "rarity_label": "🟡 Легендарный",
+        "bonus_type": "both", "bonus_label": "монеты И опыт",
+        "base_bonus": 20, "luck_bonus": 10,
+        "description": "Существо из легенд. Максимальный бонус.",
+        "weight": 1, "weight_premium": 5,
     },
 }
 
-PET_GACHA_PRICE = 2000
 
-def gacha_pull(user: dict) -> tuple[str, dict, bool]:
-    """
-    Крутит гачу. Возвращает (pet_key, pet_data, is_duplicate).
-    Если дубликат — бонус питомца растёт на 1.
-    """
-    weights    = [p["weight"] for p in PETS.values()]
-    pet_keys   = list(PETS.keys())
+def gacha_pull(user: dict, premium: bool = False) -> tuple[str, dict, bool]:
+    pet_keys = list(PETS.keys())
+    if premium:
+        weights = [p["weight_premium"] for p in PETS.values()]
+    else:
+        weights = [p["weight"] for p in PETS.values()]
+
     chosen_key = random.choices(pet_keys, weights=weights, k=1)[0]
     chosen_pet = PETS[chosen_key]
 
-    current_pet_id    = user.get("pet_id", "")
-    current_pet_bonus = user.get("pet_bonus", 0)
-    is_duplicate      = (current_pet_id == chosen_key)
+    # Загружаем коллекцию
+    import json
+    raw = user.get("pet_collection", "") or "{}"
+    try:
+        collection = json.loads(raw)
+    except Exception:
+        collection = {}
+
+    is_duplicate = chosen_key in collection
 
     if is_duplicate:
-        # Дубликат — качаем бонус питомца +1 (максимум +20)
-        new_bonus = min(current_pet_bonus + 1, 20)
-        update_user(user["user_id"], pet_bonus=new_bonus)
+        collection[chosen_key] = min(collection[chosen_key] + 1, 20)
     else:
-        # Новый питомец — заменяем
-        update_user(
-            user["user_id"],
-            pet_id=chosen_key,
-            pet_bonus=chosen_pet["base_bonus"]
-        )
+        collection[chosen_key] = chosen_pet["base_bonus"]
+        # Если нет активного пета — ставим этого
+        if not user.get("active_pet"):
+            update_user(user["user_id"], active_pet=chosen_key)
 
+    update_user(user["user_id"], pet_collection=json.dumps(collection))
     return chosen_key, chosen_pet, is_duplicate
 
 
-def get_pet_bonus(user: dict) -> tuple[int, int]:
-    """Возвращает (bonus_coins_pct, bonus_xp_pct) в процентах."""
-    pet_id = user.get("pet_id", "")
+def get_pet_bonus(user: dict) -> tuple[int, int, int]:
+    """Возвращает (bonus_coins_pct, bonus_xp_pct, bonus_luck)."""
+    import json
+    pet_id = user.get("active_pet", "") or user.get("pet_id", "")
     if not pet_id or pet_id not in PETS:
-        return 0, 0
+        return 0, 0, 0
 
-    pet   = PETS[pet_id]
-    bonus = user.get("pet_bonus", pet["base_bonus"])
+    pet = PETS[pet_id]
+    raw = user.get("pet_collection", "") or "{}"
+    try:
+        collection = json.loads(raw)
+    except Exception:
+        collection = {}
+
+    bonus = collection.get(pet_id, pet["base_bonus"])
+    luck_bonus = pet.get("luck_bonus", 0)
 
     if pet["bonus_type"] == "coins":
-        return bonus, 0
+        return bonus, 0, luck_bonus
     elif pet["bonus_type"] == "xp":
-        return 0, bonus
+        return 0, bonus, luck_bonus
+    elif pet["bonus_type"] == "luck":
+        return 0, 0, bonus + luck_bonus
     elif pet["bonus_type"] == "both":
-        return bonus, bonus
-    return 0, 0
-
+        return bonus, bonus, luck_bonus
+    return 0, 0, 0
 
 def apply_pet_bonus(user: dict, coins: int, xp: int) -> tuple[int, int]:
-    """Применяет бонус питомца к монетам и опыту."""
-    coin_pct, xp_pct = get_pet_bonus(user)
+    coin_pct, xp_pct, _ = get_pet_bonus(user)
     new_coins = int(coins * (1 + coin_pct / 100))
     new_xp    = int(xp    * (1 + xp_pct   / 100))
     return new_coins, new_xp
@@ -4408,105 +4568,174 @@ def apply_pet_bonus(user: dict, coins: int, xp: int) -> tuple[int, int]:
 @dp.message(Command("gacha"))
 @dp.message(F.text.func(lambda t: t and t.strip().lower() in ("гача", "питомец", "gacha")))
 async def cmd_gacha(message: Message):
-    uid  = message.from_user.id
+    import json
+    uid = message.from_user.id
     user = get_user_safe(uid, message.from_user.username or message.from_user.full_name)
 
-    pet_id = user.get("pet_id", "")
-    lines  = [f"🎰 <b>Гача — питомцы</b>\n"]
-    lines.append(f"💰 Цена одного броска: <b>{PET_GACHA_PRICE} монет</b>\n")
+    active_pet_id = user.get("active_pet", "") or user.get("pet_id", "")
+    raw = user.get("pet_collection", "") or "{}"
+    try:
+        collection = json.loads(raw)
+    except Exception:
+        collection = {}
 
-    if pet_id and pet_id in PETS:
-        pet   = PETS[pet_id]
-        bonus = user.get("pet_bonus", pet["base_bonus"])
+    lines = ["🎰 <b>Гача — питомцы</b>\n"]
+
+    if active_pet_id and active_pet_id in PETS:
+        pet = PETS[active_pet_id]
+        bonus = collection.get(active_pet_id, pet["base_bonus"])
+        _, _, luck_b = get_pet_bonus(user)
         lines.append(
-            f"🐾 <b>Твой питомец:</b> {pet['name']} {pet['rarity_label']}\n"
-            f"   Бонус: <b>+{bonus}%</b> к {pet['bonus_label']}\n"
-            f"   <i>{pet['description']}</i>\n"
+            f"🐾 <b>Активный питомец:</b> {pet['name']} {pet['rarity_label']}\n"
+            f"   Бонус: <b>+{bonus}%</b> к {pet['bonus_label']}"
+            + (f" | 🍀 +{luck_b} удача" if luck_b > 0 else "") + "\n"
         )
     else:
         lines.append("🐾 У тебя пока нет питомца.\n")
 
-    lines.append("━━━ Шансы ━━━")
-    lines.append("⚪ Обычный:     ~55%")
-    lines.append("🔵 Редкий:      ~35%")
-    lines.append("🟣 Эпик:        ~9%")
-    lines.append("🟡 Легендарный: ~1%")
-    lines.append(
-        "\n<i>Если выпадет тот же питомец — бонус вырастет на 1% (макс +20%)</i>"
-    )
+    total_pets = len(collection)
+    lines.append(f"📦 Коллекция: <b>{total_pets}</b> питомцев\n")
+    lines.append("━━━ Обычная гача (2000 монет) ━━━")
+    lines.append("⚪ Обычный: ~52% | 🔵 Редкий: ~35% | 🟣 Эпик: ~12% | 🟡 Леген: ~1%")
+    lines.append("\n━━━ Премиум гача (5000 монет) ━━━")
+    lines.append("⚪ Обычный: ~28% | 🔵 Редкий: ~36% | 🟣 Эпик: ~28% | 🟡 Леген: ~8%")
+    lines.append("\n<i>Дубликат = бонус питомца +1% (макс +20%)</i>")
 
     builder = InlineKeyboardBuilder()
-    builder.button(text=f"🎰 Крутить ({PET_GACHA_PRICE} монет)", callback_data="gacha_pull")
-    builder.button(text="📋 Все питомцы", callback_data="gacha_list")
+    builder.button(text="🎰 Обычная гача (2000 монет)", callback_data="gacha_pull:normal")
+    builder.button(text="💎 Премиум гача (5000 монет)", callback_data="gacha_pull:premium")
+    builder.button(text="📋 Моя коллекция", callback_data="gacha_collection")
+    builder.button(text="🔄 Выбрать активного пета", callback_data="gacha_select_menu")
     builder.adjust(1)
 
     await message.answer("\n".join(lines), reply_markup=builder.as_markup())
 
 
-@dp.callback_query(F.data == "gacha_pull")
+@dp.callback_query(F.data.startswith("gacha_pull:"))
 async def callback_gacha_pull(callback: CallbackQuery):
-    uid  = callback.from_user.id
+    import json
+    uid = callback.from_user.id
     user = get_user_safe(uid)
+    is_premium = callback.data.split(":")[1] == "premium"
+    price = PET_GACHA_PREMIUM_PRICE if is_premium else PET_GACHA_PRICE
 
-    if user["balance"] < PET_GACHA_PRICE:
-        await callback.answer(
-            f"❌ Нужно {PET_GACHA_PRICE} монет, есть {user['balance']}",
-            show_alert=True
-        )
+    if user["balance"] < price:
+        await callback.answer(f"❌ Нужно {price} монет, есть {user['balance']}", show_alert=True)
         return
 
-    new_balance = user["balance"] - PET_GACHA_PRICE
-    update_user(uid, balance=new_balance)
+    update_user(uid, balance=user["balance"] - price)
+    pet_key, pet, is_duplicate = gacha_pull(user, premium=is_premium)
 
-    pet_key, pet, is_duplicate = gacha_pull(user)
     updated = get_user(uid)
-    if not updated:
-        await callback.answer("❌ Ошибка получения данных. Попробуй ещё раз.", show_alert=True)
-        return
-    new_bonus = updated.get("pet_bonus", pet["base_bonus"])
+    raw = updated.get("pet_collection", "") or "{}"
+    try:
+        collection = json.loads(raw)
+    except Exception:
+        collection = {}
+    new_bonus = collection.get(pet_key, pet["base_bonus"])
+    _, _, luck_b = get_pet_bonus(updated)
 
+    gtype = "💎 Премиум" if is_premium else "🎰 Обычная"
     if is_duplicate:
         text = (
-            f"🎰 <b>Крутим гачу...</b>\n\n"
-            f"✨ Выпал: {pet['name']} {pet['rarity_label']}\n\n"
-            f"🔄 <b>Дубликат!</b> Питомец уже есть.\n"
-            f"💪 Бонус питомца вырос: <b>+{new_bonus}%</b> к {pet['bonus_label']}\n\n"
-            f"💰 Баланс: <b>{new_balance}</b> монет"
+                f"{gtype} гача!\n\n"
+                f"✨ Выпал: {pet['name']} {pet['rarity_label']}\n\n"
+                f"🔄 <b>Дубликат!</b> Бонус вырос: <b>+{new_bonus}%</b> к {pet['bonus_label']}"
+                + (f"\n🍀 Удача: +{luck_b}" if luck_b > 0 else "") +
+                f"\n\n💰 Баланс: <b>{updated['balance']}</b> монет"
         )
     else:
         text = (
-            f"🎰 <b>Крутим гачу...</b>\n\n"
-            f"🎉 <b>НОВЫЙ ПИТОМЕЦ!</b>\n"
-            f"{pet['name']} {pet['rarity_label']}\n"
-            f"<i>{pet['description']}</i>\n\n"
-            f"🎁 Бонус: <b>+{new_bonus}%</b> к {pet['bonus_label']}\n\n"
-            f"💰 Баланс: <b>{new_balance}</b> монет"
+                f"{gtype} гача!\n\n"
+                f"🎉 <b>НОВЫЙ ПИТОМЕЦ!</b>\n"
+                f"{pet['name']} {pet['rarity_label']}\n"
+                f"<i>{pet['description']}</i>\n\n"
+                f"🎁 Бонус: <b>+{new_bonus}%</b> к {pet['bonus_label']}"
+                + (f"\n🍀 Удача: +{luck_b}" if luck_b > 0 else "") +
+                f"\n\n💰 Баланс: <b>{updated['balance']}</b> монет"
         )
 
     await callback.answer()
     await callback.message.answer(text)
-
-    # Квест и ачивки
-    update_quest_progress(uid, "gacha")
     check_and_grant_achievements(updated)
 
 
-@dp.callback_query(F.data == "gacha_list")
-async def callback_gacha_list(callback: CallbackQuery):
-    user   = get_user_safe(callback.from_user.id)
-    my_pet = user.get("pet_id", "")
+@dp.callback_query(F.data == "gacha_collection")
+async def callback_gacha_collection(callback: CallbackQuery):
+    import json
+    user = get_user_safe(callback.from_user.id)
+    active_pet_id = user.get("active_pet", "") or user.get("pet_id", "")
+    raw = user.get("pet_collection", "") or "{}"
+    try:
+        collection = json.loads(raw)
+    except Exception:
+        collection = {}
 
-    lines = ["📋 <b>Все питомцы</b>\n"]
-    for key, pet in PETS.items():
-        owned = "✅" if my_pet == key else "  "
+    if not collection:
+        await callback.answer()
+        await callback.message.answer("📦 Коллекция пуста. Крути гачу!")
+        return
+
+    lines = ["📦 <b>Твоя коллекция питомцев</b>\n"]
+    for key, bonus in collection.items():
+        if key not in PETS:
+            continue
+        pet = PETS[key]
+        active_mark = " ◀ активный" if key == active_pet_id else ""
+        luck_str = f" | 🍀 +{pet['luck_bonus']} удача" if pet.get("luck_bonus", 0) > 0 else ""
         lines.append(
-            f"{owned} {pet['name']} {pet['rarity_label']}\n"
-            f"     +{pet['base_bonus']}% к {pet['bonus_label']}\n"
-            f"     <i>{pet['description']}</i>"
+            f"{'✅' if key == active_pet_id else '•'} {pet['name']} {pet['rarity_label']}{active_mark}\n"
+            f"  +{bonus}% к {pet['bonus_label']}{luck_str}"
         )
 
     await callback.answer()
-    await callback.message.answer("\n\n".join(lines))
+    await callback.message.answer("\n".join(lines))
+
+
+@dp.callback_query(F.data == "gacha_select_menu")
+async def callback_gacha_select_menu(callback: CallbackQuery):
+    import json
+    user = get_user_safe(callback.from_user.id)
+    raw = user.get("pet_collection", "") or "{}"
+    try:
+        collection = json.loads(raw)
+    except Exception:
+        collection = {}
+
+    if not collection:
+        await callback.answer("У тебя нет питомцев!", show_alert=True)
+        return
+
+    builder = InlineKeyboardBuilder()
+    for key in collection:
+        if key not in PETS:
+            continue
+        pet = PETS[key]
+        builder.button(text=f"{pet['name']} {pet['rarity_label']}", callback_data=f"gacha_setactive:{key}")
+    builder.adjust(1)
+
+    await callback.answer()
+    await callback.message.answer("🔄 Выбери активного питомца:", reply_markup=builder.as_markup())
+
+
+@dp.callback_query(F.data.startswith("gacha_setactive:"))
+async def callback_gacha_setactive(callback: CallbackQuery):
+    pet_key = callback.data.split(":")[1]
+    import json
+    user = get_user_safe(callback.from_user.id)
+    raw = user.get("pet_collection", "") or "{}"
+    try:
+        collection = json.loads(raw)
+    except Exception:
+        collection = {}
+
+    if pet_key not in collection:
+        await callback.answer("Этот питомец не в коллекции!", show_alert=True)
+        return
+
+    update_user(callback.from_user.id, active_pet=pet_key)
+    pet = PETS[pet_key]
+    await callback.answer(f"✅ Активный питомец: {pet['name']}!", show_alert=True)
 # =====================================================================
 # РЕПУТАЦИЯ
 # =====================================================================
@@ -5232,6 +5461,247 @@ async def cmd_current_event(message: Message):
         f"🎁 <b>Бонусы:</b>\n{bonuses_text}\n\n"
         f"⏳ Осталось: <b>{hours}ч {minutes}мин</b> (до {ends_str})"
     )
+# =====================================================================
+# БЛЕКДЖЕК
+# =====================================================================
+BJ_MIN_BET = 50
+bj_games: dict[int, dict] = {}  # user_id -> game state
+
+BJ_DECK_TEMPLATE = (
+    [str(r) for r in range(2, 11)] + ["J", "Q", "K", "A"]
+) * 4
+
+def bj_card_value(card: str) -> int:
+    if card in ("J", "Q", "K"):
+        return 10
+    if card == "A":
+        return 11
+    return int(card)
+
+def bj_hand_value(hand: list[str]) -> int:
+    total = sum(bj_card_value(c) for c in hand)
+    aces  = hand.count("A")
+    while total > 21 and aces:
+        total -= 10
+        aces  -= 1
+    return total
+
+def bj_hand_str(hand: list[str]) -> str:
+    return "  ".join(f"[{c}]" for c in hand)
+
+def bj_new_game(user_id: int, bet: int, balance: int) -> dict:
+    deck = list(BJ_DECK_TEMPLATE)
+    random.shuffle(deck)
+    player = [deck.pop(), deck.pop()]
+    dealer = [deck.pop(), deck.pop()]
+    return {
+        "user_id": user_id,
+        "bet": bet,
+        "balance": balance,
+        "deck": deck,
+        "player": player,
+        "dealer": dealer,
+        "done": False,
+    }
+
+def bj_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🃏 Ещё карту", callback_data=f"bj_hit:{user_id}")
+    builder.button(text="✋ Хватит",    callback_data=f"bj_stand:{user_id}")
+    builder.button(text="⚡ Удвоить",   callback_data=f"bj_double:{user_id}")
+    builder.adjust(3)
+    return builder.as_markup()
+
+def bj_status_text(game: dict, reveal_dealer: bool = False) -> str:
+    p_val = bj_hand_value(game["player"])
+    d_val = bj_hand_value(game["dealer"])
+
+    if reveal_dealer:
+        dealer_str = f"{bj_hand_str(game['dealer'])}  (сумма: {d_val})"
+    else:
+        dealer_str = f"[{game['dealer'][0]}]  [?]"
+
+    return (
+        f"🃏 <b>Блекджек</b>\n\n"
+        f"🏦 Дилер: {dealer_str}\n\n"
+        f"👤 Ты: {bj_hand_str(game['player'])}  (сумма: <b>{p_val}</b>)\n\n"
+        f"💰 Ставка: <b>{game['bet']}</b> монет"
+    )
+
+async def bj_finish(message_or_callback, game: dict, reason: str):
+    user_id = game["user_id"]
+    p_val   = bj_hand_value(game["player"])
+    d_val   = bj_hand_value(game["dealer"])
+    bet     = game["bet"]
+    balance = game["balance"]
+
+    # Добиваем дилера до 17+
+    while bj_hand_value(game["dealer"]) < 17:
+        game["dealer"].append(game["deck"].pop())
+    d_val = bj_hand_value(game["dealer"])
+
+    p_bj = (len(game["player"]) == 2 and p_val == 21)
+    d_bj = (len(game["dealer"]) == 2 and d_val == 21)
+
+    if p_bj and not d_bj:
+        prize   = int(bet * 1.5)
+        result  = f"🃏 <b>БЛЕКДЖЕК!</b> +{prize} монет"
+        net     = prize
+        change_reputation(user_id, +2)
+    elif p_val > 21:
+        prize   = 0
+        result  = f"💥 <b>Перебор ({p_val})!</b> Проигрыш -{bet} монет"
+        net     = -bet
+        change_reputation(user_id, -1)
+    elif d_val > 21:
+        prize   = bet
+        result  = f"🎉 <b>Дилер перебрал ({d_val})!</b> +{bet} монет"
+        net     = prize
+        change_reputation(user_id, +1)
+    elif p_val > d_val:
+        prize   = bet
+        result  = f"🏆 <b>Победа! ({p_val} vs {d_val})</b> +{bet} монет"
+        net     = prize
+        change_reputation(user_id, +1)
+    elif p_val < d_val:
+        prize   = 0
+        result  = f"😢 <b>Проигрыш ({p_val} vs {d_val})</b> -{bet} монет"
+        net     = -bet
+        change_reputation(user_id, -1)
+    else:
+        prize   = 0
+        result  = f"🤝 <b>Ничья ({p_val})</b> — ставка возвращена"
+        net     = 0
+
+    new_balance = balance + net
+    update_user(user_id, balance=new_balance)
+
+    if game["user_id"] in bj_games:
+        del bj_games[game["user_id"]]
+
+    text = (
+        f"🃏 <b>Блекджек — итог</b>\n\n"
+        f"🏦 Дилер: {bj_hand_str(game['dealer'])}  (сумма: {d_val})\n"
+        f"👤 Ты:    {bj_hand_str(game['player'])}  (сумма: {p_val})\n\n"
+        f"{result}\n"
+        f"💳 Баланс: <b>{new_balance}</b> монет"
+    )
+
+    if hasattr(message_or_callback, "message"):
+        await message_or_callback.answer()
+        await message_or_callback.message.answer(text)
+    else:
+        await message_or_callback.answer(text)
+
+    # Квест и ачивки
+    updated = get_user(user_id)
+    if updated:
+        check_and_grant_achievements(updated)
+
+
+@dp.message(F.text.func(lambda t: t and t.strip().lower().startswith("блекджек ")))
+async def cmd_blackjack(message: Message):
+    uid   = message.from_user.id
+    user  = get_user_safe(uid, message.from_user.username or message.from_user.full_name)
+
+    if uid in bj_games:
+        await message.answer("⚠️ У тебя уже идёт партия! Доиграй сначала.")
+        return
+
+    parts = message.text.strip().split()
+    if len(parts) != 2 or not parts[1].isdigit():
+        await message.answer("❌ Формат: <code>блекджек 200</code>")
+        return
+
+    bet = int(parts[1])
+    if bet < BJ_MIN_BET:
+        await message.answer(f"❌ Мин. ставка: <b>{BJ_MIN_BET}</b> монет.")
+        return
+    if user["balance"] < bet:
+        await message.answer(f"❌ Недостаточно монет. Баланс: <b>{user['balance']}</b>")
+        return
+
+    update_user(uid, balance=user["balance"] - bet)
+    game = bj_new_game(uid, bet, user["balance"] - bet)
+    bj_games[uid] = game
+
+    p_val = bj_hand_value(game["player"])
+
+    # Мгновенный блекджек
+    if p_val == 21:
+        await message.answer(bj_status_text(game, reveal_dealer=False))
+        await bj_finish(message, game, "blackjack")
+        return
+
+    await message.answer(bj_status_text(game), reply_markup=bj_keyboard(uid))
+
+
+@dp.callback_query(F.data.startswith("bj_hit:"))
+async def bj_hit(callback: CallbackQuery):
+    uid  = int(callback.data.split(":")[1])
+    if callback.from_user.id != uid:
+        await callback.answer("Это не твоя игра!", show_alert=True)
+        return
+
+    game = bj_games.get(uid)
+    if not game:
+        await callback.answer("Игра не найдена.", show_alert=True)
+        return
+
+    game["player"].append(game["deck"].pop())
+    p_val = bj_hand_value(game["player"])
+
+    if p_val >= 21:
+        await callback.answer()
+        await callback.message.edit_text(bj_status_text(game, reveal_dealer=False))
+        await bj_finish(callback, game, "bust" if p_val > 21 else "21")
+    else:
+        await callback.answer()
+        await callback.message.edit_text(bj_status_text(game), reply_markup=bj_keyboard(uid))
+
+
+@dp.callback_query(F.data.startswith("bj_stand:"))
+async def bj_stand(callback: CallbackQuery):
+    uid  = int(callback.data.split(":")[1])
+    if callback.from_user.id != uid:
+        await callback.answer("Это не твоя игра!", show_alert=True)
+        return
+
+    game = bj_games.get(uid)
+    if not game:
+        await callback.answer("Игра не найдена.", show_alert=True)
+        return
+
+    await callback.answer()
+    await bj_finish(callback, game, "stand")
+
+
+@dp.callback_query(F.data.startswith("bj_double:"))
+async def bj_double(callback: CallbackQuery):
+    uid  = int(callback.data.split(":")[1])
+    if callback.from_user.id != uid:
+        await callback.answer("Это не твоя игра!", show_alert=True)
+        return
+
+    game = bj_games.get(uid)
+    if not game:
+        await callback.answer("Игра не найдена.", show_alert=True)
+        return
+
+    # Проверяем баланс на удвоение
+    user = get_user(uid)
+    if not user or user["balance"] < game["bet"]:
+        await callback.answer("❌ Недостаточно монет для удвоения!", show_alert=True)
+        return
+
+    update_user(uid, balance=user["balance"] - game["bet"])
+    game["balance"] = user["balance"] - game["bet"]
+    game["bet"] *= 2
+
+    # Берём ровно одну карту
+    game["player"].append(game["deck"].pop())
+    await callback.answer()
+    await bj_finish(callback, game, "double")
 # =====================================================================
 # ТОЧКА ВХОДА
 # =====================================================================
