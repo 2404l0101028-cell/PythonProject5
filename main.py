@@ -640,6 +640,182 @@ CONSUMABLES = {
 }
 
 # =====================================================================
+# НЕДВИЖИМОСТЬ / ПАССИВНЫЙ ДОХОД
+# =====================================================================
+PROPERTIES = {
+    "kiosk": {
+        "name": "🏪 Киоск у Джал-Маркета",
+        "price": 5000,
+        "income_per_hour": 50,
+        "min_level": 5,
+        "description": "Маленький ларёк, приносит стабильный доход.",
+    },
+    "cafe": {
+        "name": "☕ Кофейня у ворот Манаса",
+        "price": 15000,
+        "income_per_hour": 150,
+        "min_level": 15,
+        "description": "Студенты любят кофе. Доход побольше.",
+    },
+    "dorm_laundry": {
+        "name": "🧺 Прачечная в общаге",
+        "price": 30000,
+        "income_per_hour": 300,
+        "min_level": 25,
+        "description": "Монотонный, но надёжный доход.",
+    },
+    "print_shop": {
+        "name": "🖨 Типография методичек",
+        "price": 60000,
+        "income_per_hour": 600,
+        "min_level": 35,
+        "description": "Печатает конспекты и шпаргалки 24/7.",
+    },
+    "donerhouse": {
+        "name": "🌯 Донерная у главного корпуса",
+        "price": 120000,
+        "income_per_hour": 1200,
+        "min_level": 50,
+        "description": "Очередь не заканчивается никогда.",
+    },
+    "apartments": {
+        "name": "🏢 Сдаваемые квартиры у Джала",
+        "price": 250000,
+        "income_per_hour": 2500,
+        "min_level": 70,
+        "description": "Студенты платят за жильё каждый месяц.",
+    },
+    "mall": {
+        "name": "🏬 Торговый центр «Манас Plaza»",
+        "price": 500000,
+        "income_per_hour": 5000,
+        "min_level": 90,
+        "description": "Целый ТЦ, набитый арендаторами.",
+    },
+}
+
+PASSIVE_INCOME_CAP_HOURS = 12  # доход копится максимум 12 часов
+
+
+def get_user_properties(user: dict) -> dict:
+    import json
+    raw = user.get("properties", "") or "{}"
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {}
+
+
+def save_user_properties(user_id: int, props: dict):
+    import json
+    update_user(user_id, properties=json.dumps(props))
+
+
+def get_total_income_per_hour(user: dict) -> int:
+    props = get_user_properties(user)
+    return sum(PROPERTIES[key]["income_per_hour"] for key in props if key in PROPERTIES)
+
+
+def build_properties_text(user: dict) -> str:
+    props = get_user_properties(user)
+    total_income = get_total_income_per_hour(user)
+
+    now = int(time.time())
+    last = user.get("last_income_collect", 0) or now
+    elapsed_h = min((now - last) / 3600, PASSIVE_INCOME_CAP_HOURS)
+    pending = int(total_income * elapsed_h)
+
+    lines = [
+        "🏠 <b>Недвижимость и бизнесы</b>\n",
+        f"💵 Доход в час: <b>{total_income}</b> монет",
+        f"💰 Накоплено к сбору: <b>{pending}</b> монет "
+        f"(макс. {PASSIVE_INCOME_CAP_HOURS}ч накопления)\n",
+    ]
+
+    if not props:
+        lines.append("У тебя пока нет бизнесов.\n")
+    else:
+        lines.append("<b>Твои объекты:</b>")
+        for key in props:
+            p = PROPERTIES.get(key)
+            if p:
+                lines.append(f"  • {p['name']} — {p['income_per_hour']}/ч")
+        lines.append("")
+
+    lines.append("<b>Доступно для покупки:</b>")
+    for key, p in PROPERTIES.items():
+        if key in props:
+            continue
+        lock = "" if user["level"] >= p["min_level"] else f" 🔒 (нужен {p['min_level']} ур.)"
+        lines.append(
+            f"  • {p['name']} — {p['price']} монет, {p['income_per_hour']}/ч{lock}\n"
+            f"    <i>{p['description']}</i>"
+        )
+
+    return "\n".join(lines)
+
+
+def get_properties_keyboard(user: dict) -> InlineKeyboardMarkup:
+    props = get_user_properties(user)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="💰 Собрать доход", callback_data="income_collect")
+    for key, p in PROPERTIES.items():
+        if key in props:
+            continue
+        if user["level"] < p["min_level"]:
+            continue
+        builder.button(
+            text=f"🛒 {p['name']} — {p['price']} мон.",
+            callback_data=f"property_buy:{key}"
+        )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def do_buy_property(user: dict, prop_key: str) -> tuple[bool, str]:
+    prop = PROPERTIES.get(prop_key)
+    if not prop:
+        return False, "❌ Такого объекта нет."
+    props = get_user_properties(user)
+    if prop_key in props:
+        return False, "У тебя уже есть этот объект!"
+    if user["level"] < prop["min_level"]:
+        return False, f"❌ Нужен уровень <b>{prop['min_level']}</b>."
+    if user["balance"] < prop["price"]:
+        return False, f"❌ Недостаточно монет. Нужно {prop['price']}."
+
+    props[prop_key] = int(time.time())
+    save_user_properties(user["user_id"], props)
+    new_balance = user["balance"] - prop["price"]
+    last_collect = user.get("last_income_collect", 0) or int(time.time())
+    update_user(
+        user["user_id"],
+        balance=new_balance,
+        last_income_collect=last_collect or int(time.time()),
+    )
+    return True, f"✅ Куплено: {prop['name']}!\n💰 Потрачено: {prop['price']} монет."
+
+
+def do_collect_income(user: dict) -> tuple[bool, str]:
+    total_income = get_total_income_per_hour(user)
+    if total_income == 0:
+        return False, "❌ У тебя пока нет приносящей доход недвижимости."
+
+    now = int(time.time())
+    last = user.get("last_income_collect", 0) or now
+    elapsed_h = min((now - last) / 3600, PASSIVE_INCOME_CAP_HOURS)
+    pending = int(total_income * elapsed_h)
+
+    if pending <= 0:
+        return False, "⏳ Пока нечего собирать, доход ещё капает."
+
+    new_balance = user["balance"] + pending
+    update_user(user["user_id"], balance=new_balance, last_income_collect=now)
+    return True, (
+        f"💰 Собран пассивный доход: <b>+{pending}</b> монет!\n"
+        f"📊 Баланс: <b>{new_balance}</b> монет"
+    )
+# =====================================================================
 # НАВЫКИ
 # =====================================================================
 SKILL_CONFIG = {
@@ -801,6 +977,123 @@ ACHIEVEMENTS = {
     },
 }
 
+# =====================================================================
+# ТИТУЛЫ
+# =====================================================================
+TITLES = {
+    # ── авто-титулы (выдаются за уникальные достижения) ──
+    "millionaire": {
+        "name": "💎 Миллионер", "admin_only": False,
+        "bonus_coins": 5, "bonus_xp": 0, "bonus_luck": 0,
+        "description": "Накопи 1 000 000 монет.",
+        "condition": lambda u: u["balance"] >= 1000000,
+    },
+    "rector": {
+        "name": "👑 Ректор", "admin_only": False,
+        "bonus_coins": 0, "bonus_xp": 10, "bonus_luck": 0,
+        "description": "Достигни 9 грейда ветки Интеллект.",
+        "condition": lambda u: get_job(u) is not None and get_job(u)["branch"] == "intel" and get_job(u)["grade"] == 9,
+    },
+    "mogul": {
+        "name": "🏙 Магнат", "admin_only": False,
+        "bonus_coins": 10, "bonus_xp": 0, "bonus_luck": 0,
+        "description": "Достигни 9 грейда ветки Баланс.",
+        "condition": lambda u: get_job(u) is not None and get_job(u)["branch"] == "balance" and get_job(u)["grade"] == 9,
+    },
+    "food_king": {
+        "name": "🍔 Король общепита", "admin_only": False,
+        "bonus_coins": 10, "bonus_xp": 0, "bonus_luck": 0,
+        "description": "Достигни 9 грейда ветки Деньги.",
+        "condition": lambda u: get_job(u) is not None and get_job(u)["branch"] == "money" and get_job(u)["grade"] == 9,
+    },
+    "legend": {
+        "name": "🌟 Легенда КТУ", "admin_only": False,
+        "bonus_coins": 5, "bonus_xp": 5, "bonus_luck": 5,
+        "description": "Достигни 100 уровня.",
+        "condition": lambda u: u["level"] >= 100,
+    },
+    "gambler": {
+        "name": "🎰 Картёжник", "admin_only": False,
+        "bonus_coins": 0, "bonus_xp": 0, "bonus_luck": 10,
+        "description": "Выиграй в покер и блекджек хотя бы раз.",
+        "condition": lambda u: "poker_win" in get_user_achievements(u) and "stock_win" in get_user_achievements(u),
+    },
+    "collector": {
+        "name": "🎒 Снаряженец", "admin_only": False,
+        "bonus_coins": 3, "bonus_xp": 3, "bonus_luck": 3,
+        "description": "Купи всё снаряжение в магазине.",
+        "condition": lambda u: all(u.get(item["flag"]) for item in SHOP_ITEMS.values()),
+    },
+
+    # ── админ-титулы (условие отсутствует — выдаются только командой) ──
+    "tester": {
+        "name": "🧪 Тестировщик", "admin_only": True,
+        "bonus_coins": 15, "bonus_xp": 15, "bonus_luck": 15,
+        "description": "Выдаётся вручную администратором.",
+        "condition": None,
+    },
+    "developer": {
+        "name": "🛠 Разработчик", "admin_only": True,
+        "bonus_coins": 20, "bonus_xp": 20, "bonus_luck": 20,
+        "description": "Выдаётся вручную администратором.",
+        "condition": None,
+    },
+    "vip": {
+        "name": "🎖 VIP", "admin_only": True,
+        "bonus_coins": 10, "bonus_xp": 10, "bonus_luck": 10,
+        "description": "Особый статус от администрации.",
+        "condition": None,
+    },
+}
+
+
+def get_user_titles(user: dict) -> set:
+    raw = user.get("titles", "") or ""
+    return set(x for x in raw.split(",") if x)
+
+
+def save_titles(user_id: int, titles_set: set):
+    update_user(user_id, titles=",".join(titles_set))
+
+
+def check_and_grant_titles(user: dict) -> list[str]:
+    """Проверяет авто-условия титулов и выдаёт новые."""
+    owned = get_user_titles(user)
+    new_titles = []
+    for key, cfg in TITLES.items():
+        if cfg["admin_only"] or cfg["condition"] is None:
+            continue
+        if key in owned:
+            continue
+        try:
+            if cfg["condition"](user):
+                owned.add(key)
+                new_titles.append(key)
+        except Exception:
+            pass
+
+    if new_titles:
+        save_titles(user["user_id"], owned)
+        # если активного титула нет — ставим первый полученный
+        if not user.get("active_title"):
+            update_user(user["user_id"], active_title=new_titles[0])
+
+    messages = []
+    for key in new_titles:
+        t = TITLES[key]
+        messages.append(
+            f"🎖 <b>Новый титул!</b> {t['name']}\n<i>{t['description']}</i>"
+        )
+    return messages
+
+
+def get_title_bonus(user: dict) -> tuple[int, int, int]:
+    """Возвращает (bonus_coins_pct, bonus_xp_pct, bonus_luck) от активного титула."""
+    active = user.get("active_title", "")
+    if not active or active not in TITLES:
+        return 0, 0, 0
+    t = TITLES[active]
+    return t["bonus_coins"], t["bonus_xp"], t["bonus_luck"]
 
 def get_user_achievements(user: dict) -> set:
     raw = user.get("achievements", "") or ""
@@ -957,6 +1250,23 @@ def init_db():
                 ("event_ends_at", "INTEGER DEFAULT 0"),
                 ("pet_collection", "TEXT DEFAULT ''"),
                 ("active_pet", "TEXT DEFAULT ''"),
+                ("titles", "TEXT DEFAULT ''"),
+                ("active_title", "TEXT DEFAULT ''"),
+                ("properties", "TEXT DEFAULT '{}'"),
+                ("last_income_collect", "INTEGER DEFAULT 0"),
+                ("last_daily_claim", "INTEGER DEFAULT 0"),
+                ("daily_streak", "INTEGER DEFAULT 0"),
+                ("stat_work_count", "INTEGER DEFAULT 0"),
+                ("stat_duel_wins", "INTEGER DEFAULT 0"),
+                ("stat_duel_losses", "INTEGER DEFAULT 0"),
+                ("stat_dice_wins", "INTEGER DEFAULT 0"),
+                ("stat_dice_losses", "INTEGER DEFAULT 0"),
+                ("stat_poker_wins", "INTEGER DEFAULT 0"),
+                ("stat_blackjack_wins", "INTEGER DEFAULT 0"),
+                ("stat_blackjack_losses", "INTEGER DEFAULT 0"),
+                ("stat_slots_played", "INTEGER DEFAULT 0"),
+                ("stat_stock_wins", "INTEGER DEFAULT 0"),
+                ("stat_stock_losses", "INTEGER DEFAULT 0"),
             ]:
                 try:
                     with get_conn() as conn:  # <-- отдельное соединение на каждый ALTER
@@ -1279,6 +1589,9 @@ def do_work(user: dict) -> tuple[bool, str]:
         earned_coins = scale_coins(base_coins, lvl)
         earned_exp = scale_xp(base_exp, lvl)
         earned_coins, earned_exp = apply_pet_bonus(user, earned_coins, earned_exp)
+        title_coin_pct, title_xp_pct, _ = get_title_bonus(user)
+        earned_coins = int(earned_coins * (1 + title_coin_pct / 100))
+        earned_exp = int(earned_exp * (1 + title_xp_pct / 100))
         branch = job["branch"]
 
         # Ивент-множители
@@ -1296,7 +1609,8 @@ def do_work(user: dict) -> tuple[bool, str]:
     event_prefix = ""
     if random.random() < 0.20:
         _, _, pet_luck = get_pet_bonus(user)
-        luck = user.get("luck", 1) + pet_luck
+        _, _, title_luck = get_title_bonus(user)
+        luck = user.get("luck", 1) + pet_luck + title_luck
         _, _, ev_lucky, _ = get_event_multipliers()
         pos_chance = min(luck * 4 + ev_lucky, 95) / 100
         branch_events = WORK_EVENTS.get(branch, {}) if branch else {}
@@ -1334,6 +1648,9 @@ def do_work(user: dict) -> tuple[bool, str]:
     ach_msgs = check_and_grant_achievements(user)
     ach_block = ("\n\n" + "\n".join(ach_msgs)) if ach_msgs else ""
 
+    title_msgs = check_and_grant_titles(user)
+    title_block = ("\n\n" + "\n".join(title_msgs)) if title_msgs else ""
+
     quest_msgs = update_quest_progress(user["user_id"], "work")
     quest_msgs += update_quest_progress(user["user_id"], "earn", earned_coins)
     quest_block = ("\n\n" + "\n".join(quest_msgs)) if quest_msgs else ""
@@ -1344,6 +1661,7 @@ def do_work(user: dict) -> tuple[bool, str]:
         elif "⚠️" in event_line:
             change_reputation(user["user_id"], -1)
     change_reputation(user["user_id"], +1)  # за работу всегда +1
+    bump_stat(user["user_id"], "stat_work_count")
     event_block = f"\n\n{event_prefix}{event_line}" if event_line else ""
     max_energy  = get_max_energy(user)
 
@@ -1356,6 +1674,7 @@ def do_work(user: dict) -> tuple[bool, str]:
         f"📊 Итого монет: <b>{user['balance']}</b>"
         f"{level_block}"
         f"{ach_block}"
+        f"{title_block}"
         f"{quest_block}"
     )
 
@@ -1594,6 +1913,8 @@ def build_profile_text(user: dict, mention: str) -> str:
     grade      = job["grade"] if job else 0
     rep = user.get("reputation", 0)
     rep_title, _ = get_rep_title(rep)
+    active_title = user.get("active_title", "")
+    title_line = f"🎖 Титул: <b>{TITLES[active_title]['name']}</b>\n" if active_title in TITLES else ""
 
     inv_parts = []
     for key, item in SHOP_ITEMS.items():
@@ -1613,6 +1934,7 @@ def build_profile_text(user: dict, mention: str) -> str:
         f"👤 <b>Профиль</b> {mention}\n\n"
         f"💼 Профессия: <b>{user['job']}</b>"
         + (f"  [Грейд {grade}/9, Ранг {rank}]" if grade > 0 else "") + "\n"
+        f"{title_line}"                                                               
         f"⭐ Уровень: <b>{lvl}</b>\n"
         f"⭐ Репутация:     <b>{rep}</b> ({rep_title})\n"                                                               
         f"✨ Опыт: <b>{user['exp']}</b> / {needed_xp}\n"
@@ -1642,6 +1964,8 @@ def get_main_menu() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="👤 Профиль"),      KeyboardButton(text="💼 Профессии")],
             [KeyboardButton(text="🛠 Работа"),        KeyboardButton(text="🏋️ Тренировки")],
             [KeyboardButton(text="🧠 Навыки"),        KeyboardButton(text="🛒 Магазин")],
+            [KeyboardButton(text="🏠 Недвижимость"),  KeyboardButton(text="📊 Статистика")],
+            [KeyboardButton(text="🎁 Ежедневный")],
         ],
         resize_keyboard=True,
         persistent=True,
@@ -1699,6 +2023,7 @@ def do_stock_bet(user: dict, outcome_input: str, bet: int) -> tuple[bool, str]:
         new_balance = user["balance"] + bet
         update_user(user["user_id"], balance=new_balance)
         change_reputation(user["user_id"], +1)
+        bump_stat(user["user_id"], "stat_stock_wins")
         update_quest_progress(user["user_id"], "stock")
         updated = get_user(user["user_id"])
         if updated:
@@ -1716,6 +2041,7 @@ def do_stock_bet(user: dict, outcome_input: str, bet: int) -> tuple[bool, str]:
         new_balance = user["balance"] - bet
         update_user(user["user_id"], balance=new_balance)
         change_reputation(user["user_id"], -1)
+        bump_stat(user["user_id"], "stat_stock_losses")
         phrase = random.choice(STOCK_LOSE_PHRASES)
         player_label = STOCK_LABELS[outcome_input]
         text = (
@@ -2496,6 +2822,7 @@ HELP_CATEGORIES = {
             "👤 <b>Персонаж и развитие</b>\n\n"
             "<b>Профиль</b> — уровень, баланс, характеристики\n"
             "<b>Профессии</b> — выбор и повышение грейда\n"
+            "<b>Титулы</b> — уникальные баффы за достижения (/titles)\n"
             "<b>Тренировки</b> — прокачать Интеллект/Выносливость\n"
             "<b>Навыки</b> — Коммуникация, Вождение, Харизма и др.\n"
             "<b>Магазин</b> — снаряжение и еда\n"
@@ -2557,7 +2884,7 @@ HELP_CATEGORIES = {
             "🐾 <b>Питомцы</b>\n\n"
             "<b>гача</b> или /gacha — открыть меню гачи\n"
             f"  Обычная: 2000 монет\n"
-            f"  Премиум: 3500 монет (выше шанс редких)\n"
+            f"  Премиум: 5000 монет (выше шанс редких)\n"
             "  Дубликат = бонус питомца +1% (макс +20%)\n"
             "  Питомцы хранятся в коллекции!\n\n"
             "📋 <b>Квесты</b>\n\n"
@@ -3174,6 +3501,7 @@ async def _poker_next_turn(message: Message, game: PokerGame):
 async def _poker_end_single(message: Message, game: PokerGame, winner_id: int):
     winner = game.players[winner_id]
     new_bal = winner["balance"] + game.pot
+    bump_stat(winner_id, "stat_poker_wins")  # в _poker_end_single
     update_user(winner_id, balance=new_bal)
 
     await message.answer(
@@ -3205,6 +3533,7 @@ async def _poker_showdown(message: Message, game: PokerGame):
         if prize > 0:
             new_bal = game.players[uid]["balance"] + prize
             update_user(uid, balance=new_bal)
+            bump_stat(uid, "stat_poker_wins")  # в _poker_showdown, внутри цикла winners_text
             winners_text.append(
                 f"🥇 <b>{game.players[uid]['name']}</b> "
                 f"выигрывает <b>{prize}</b> монет! "
@@ -3354,6 +3683,20 @@ async def poker_cancel(message: Message):
     await message.answer("🚫 Покер отменён. Ставки возвращены игрокам.")
 
 
+@dp.message(F.chat.type.in_({"group", "supergroup"}),
+            F.text.func(lambda t: t and _is(t, "недвижимость", "бизнес")))
+async def txt_properties_group(message: Message):
+    await cmd_properties(message)
+
+@dp.message(F.chat.type.in_({"group", "supergroup"}),
+            F.text.func(lambda t: t and _is(t, "статистика")))
+async def txt_stats_group(message: Message):
+    await cmd_stats(message)
+
+@dp.message(F.chat.type.in_({"group", "supergroup"}),
+            F.text.func(lambda t: t and _is(t, "ежедневный", "бонус")))
+async def txt_daily_group(message: Message):
+    await cmd_daily(message)
 # =====================================================================
 # ПЕРЕВОД ДЕНЕГ
 # =====================================================================
@@ -3534,6 +3877,18 @@ async def btn_skills_private(message: Message):
     text, kb = build_skills_text(user)
     await message.answer(text, reply_markup=kb)
 
+@dp.message(F.text == "🏠 Недвижимость", F.chat.type == "private")
+async def btn_properties_private(message: Message):
+    await cmd_properties(message)
+
+@dp.message(F.text == "📊 Статистика", F.chat.type == "private")
+async def btn_stats_private(message: Message):
+    await cmd_stats(message)
+
+@dp.message(F.text == "🎁 Ежедневный", F.chat.type == "private")
+async def btn_daily_private(message: Message):
+    await cmd_daily(message)
+
 @dp.message(F.text == "🛒 Магазин", F.chat.type == "private")
 async def btn_shop_private(message: Message):
     user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
@@ -3544,7 +3899,34 @@ def _is(text: str, *variants: str) -> bool:
     if not text:
         return False
     return text.strip().lower() in {v.lower() for v in variants}
+@dp.message(Command("properties"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("недвижимость", "бизнес", "доход")))
+async def cmd_properties(message: Message):
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
+    await message.answer(build_properties_text(user), reply_markup=get_properties_keyboard(user))
 
+
+@dp.callback_query(F.data == "income_collect")
+async def callback_income_collect(callback: CallbackQuery):
+    user = get_user_safe(callback.from_user.id)
+    success, text = do_collect_income(user)
+    await callback.answer()
+    await callback.message.answer(text)
+    if success:
+        updated = get_user(callback.from_user.id)
+        await callback.message.edit_text(build_properties_text(updated), reply_markup=get_properties_keyboard(updated))
+
+
+@dp.callback_query(F.data.startswith("property_buy:"))
+async def callback_property_buy(callback: CallbackQuery):
+    key = callback.data.split(":")[1]
+    user = get_user_safe(callback.from_user.id)
+    success, text = do_buy_property(user, key)
+    await callback.answer()
+    await callback.message.answer(text)
+    if success:
+        updated = get_user(callback.from_user.id)
+        await callback.message.edit_text(build_properties_text(updated), reply_markup=get_properties_keyboard(updated))
 
 @dp.message(Command("start"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_start_group(message: Message):
@@ -4033,6 +4415,87 @@ async def cmd_set_stat(message: Message):
         f"✅ Стат <b>{stat_name}</b> пользователя <code>{target_id}</code> "
         f"установлен в <b>{value}</b>"
     )
+@dp.message(Command("give_title"))
+async def cmd_give_title(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+
+    parts = message.text.strip().split()
+    target_id  = None
+    title_key  = None
+
+    if message.reply_to_message and message.reply_to_message.from_user:
+        target_id = message.reply_to_message.from_user.id
+        if len(parts) >= 2:
+            title_key = parts[1].lower()
+    else:
+        if len(parts) >= 3 and parts[1].isdigit():
+            target_id = int(parts[1])
+            title_key = parts[2].lower()
+
+    if not target_id or not title_key or title_key not in TITLES:
+        keys = "\n".join(f"  <code>{k}</code> — {v['name']}" for k, v in TITLES.items())
+        await message.answer(
+            "❌ Формат:\n"
+            "<code>/give_title 12345678 tester</code>\n"
+            "или ответом: <code>/give_title tester</code>\n\n"
+            f"Доступные титулы:\n{keys}"
+        )
+        return
+
+    register_user(target_id)
+    user = get_user(target_id)
+    if not user:
+        await message.answer("❌ Пользователь не найден.")
+        return
+
+    owned = get_user_titles(user)
+    owned.add(title_key)
+    save_titles(target_id, owned)
+    if not user.get("active_title"):
+        update_user(target_id, active_title=title_key)
+
+    await message.answer(
+        f"✅ Титул <b>{TITLES[title_key]['name']}</b> выдан пользователю <code>{target_id}</code>"
+    )
+
+
+@dp.message(Command("remove_title"))
+async def cmd_remove_title(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+
+    parts = message.text.strip().split()
+    target_id = None
+    title_key = None
+
+    if message.reply_to_message and message.reply_to_message.from_user:
+        target_id = message.reply_to_message.from_user.id
+        if len(parts) >= 2:
+            title_key = parts[1].lower()
+    else:
+        if len(parts) >= 3 and parts[1].isdigit():
+            target_id = int(parts[1])
+            title_key = parts[2].lower()
+
+    if not target_id or not title_key:
+        await message.answer("❌ Формат: <code>/remove_title 12345678 tester</code>")
+        return
+
+    user = get_user(target_id)
+    if not user:
+        await message.answer("❌ Пользователь не найден.")
+        return
+
+    owned = get_user_titles(user)
+    owned.discard(title_key)
+    save_titles(target_id, owned)
+    if user.get("active_title") == title_key:
+        update_user(target_id, active_title="")
+
+    await message.answer(f"✅ Титул <code>{title_key}</code> снят с пользователя <code>{target_id}</code>")
 # =====================================================================
 # ДУЭЛИ
 # =====================================================================
@@ -4241,6 +4704,8 @@ async def duel_accept(callback: CallbackQuery):
     update_user(loser_id,  balance=new_loser_bal)
     change_reputation(winner_id, +3)
     change_reputation(loser_id, -2)
+    bump_stat(winner_id, "stat_duel_wins")
+    bump_stat(loser_id, "stat_duel_losses")
 
     del active_duels[chat_id]
 
@@ -4381,6 +4846,62 @@ async def cmd_quests(message: Message):
         lines.append("🏆 <b>Все квесты выполнены! Заходи завтра за новыми.</b>")
 
     await message.answer("\n\n".join(lines))
+
+# =====================================================================
+# ЕЖЕДНЕВНЫЙ БОНУС
+# =====================================================================
+DAILY_BASE_COINS = 100
+DAILY_BASE_EXP   = 30
+DAILY_STREAK_CAP = 30          # макс. дней в стрике, после которого рост бонуса останавливается
+DAILY_RESET_HOURS = 48         # если не зашёл за это время — стрик сбрасывается
+
+
+def do_claim_daily(user: dict) -> tuple[bool, str]:
+    now = int(time.time())
+    last = user.get("last_daily_claim", 0)
+    streak = user.get("daily_streak", 0)
+
+    if last:
+        elapsed_h = (now - last) / 3600
+        if elapsed_h < 20:
+            remaining_h = 20 - elapsed_h
+            return False, f"⏳ Уже забирал сегодня. Возвращайся через ~{remaining_h:.1f}ч."
+        if elapsed_h > DAILY_RESET_HOURS:
+            streak = 0  # стрик сгорел
+
+    streak = min(streak + 1, DAILY_STREAK_CAP)
+    coins = DAILY_BASE_COINS + streak * 20
+    exp   = DAILY_BASE_EXP   + streak * 5
+
+    new_balance = user["balance"] + coins
+    new_exp     = user["exp"]     + exp
+    update_user(
+        user["user_id"],
+        balance=new_balance, exp=new_exp,
+        last_daily_claim=now, daily_streak=streak,
+    )
+    user = {**user, "balance": new_balance, "exp": new_exp}
+    user, level_msgs = auto_level_up(user)
+    level_block = "".join(level_msgs)
+
+    return True, (
+        f"🎁 <b>Ежедневный бонус получен!</b>\n\n"
+        f"🔥 Стрик: <b>{streak}</b> дн.\n"
+        f"💰 Монеты: <b>+{coins}</b>\n"
+        f"✨ Опыт: <b>+{exp}</b>"
+        f"{level_block}"
+    )
+
+@dp.message(Command("daily"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("ежедневный", "бонус", "daily")))
+async def cmd_daily(message: Message):
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
+    success, text = do_claim_daily(user)
+    await message.answer(text)
+    if success:
+        updated = get_user(message.from_user.id)
+        check_and_grant_achievements(updated)
+        check_and_grant_titles(updated)
 
 PET_GACHA_PRICE = 2000
 PET_GACHA_PREMIUM_PRICE = 5000  # новая премиум гача
@@ -4781,6 +5302,12 @@ def get_rep_discount(rep: int) -> int:
             break
     return discount
 
+def bump_stat(user_id: int, field: str, amount: int = 1):
+    user = get_user(user_id)
+    if not user:
+        return
+    update_user(user_id, **{field: user.get(field, 0) + amount})
+
 def change_reputation(user_id: int, amount: int) -> tuple[int, int]:
     user = get_user(user_id)
     if not user:
@@ -4831,6 +5358,101 @@ async def cmd_reputation(message: Message):
         f"❌ Поражение в дуэли: -2\n"
         f"❌ Проигрыш на бирже: -1\n"
         f"❌ Негативное событие на работе: -1"
+    )
+@dp.message(Command("titles"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("титулы", "титул")))
+async def cmd_titles(message: Message):
+    uid  = message.from_user.id
+    user = get_user_safe(uid, message.from_user.username or message.from_user.full_name)
+
+    title_msgs = check_and_grant_titles(user)
+    for m in title_msgs:
+        await message.answer(m)
+    user = get_user(uid)
+
+    owned  = get_user_titles(user)
+    active = user.get("active_title", "")
+
+    lines = ["🎖 <b>Титулы</b>\n"]
+    if not owned:
+        lines.append("У тебя пока нет титулов. Достигай уникальных целей!")
+    else:
+        for key in owned:
+            t = TITLES.get(key)
+            if not t:
+                continue
+            mark = " ◀ активный" if key == active else ""
+            bonus_parts = []
+            if t["bonus_coins"]: bonus_parts.append(f"+{t['bonus_coins']}% монет")
+            if t["bonus_xp"]:    bonus_parts.append(f"+{t['bonus_xp']}% опыта")
+            if t["bonus_luck"]:  bonus_parts.append(f"+{t['bonus_luck']} удачи")
+            lines.append(
+                f"{'✅' if key == active else '•'} <b>{t['name']}</b>{mark}\n"
+                f"   {', '.join(bonus_parts)}\n"
+                f"   <i>{t['description']}</i>"
+            )
+
+    builder = InlineKeyboardBuilder()
+    for key in owned:
+        if key in TITLES:
+            builder.button(text=TITLES[key]["name"], callback_data=f"title_set:{key}")
+    if active:
+        builder.button(text="🚫 Снять титул", callback_data="title_unset")
+    builder.adjust(1)
+
+    await message.answer("\n\n".join(lines), reply_markup=builder.as_markup() if owned else None)
+
+
+@dp.callback_query(F.data.startswith("title_set:"))
+async def callback_title_set(callback: CallbackQuery):
+    key  = callback.data.split(":")[1]
+    user = get_user_safe(callback.from_user.id)
+    owned = get_user_titles(user)
+    if key not in owned or key not in TITLES:
+        await callback.answer("Титул недоступен.", show_alert=True)
+        return
+    update_user(callback.from_user.id, active_title=key)
+    await callback.answer(f"✅ Активный титул: {TITLES[key]['name']}!", show_alert=True)
+
+
+@dp.callback_query(F.data == "title_unset")
+async def callback_title_unset(callback: CallbackQuery):
+    update_user(callback.from_user.id, active_title="")
+    await callback.answer("Титул снят.", show_alert=True)
+
+@dp.message(Command("stats"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("статистика", "stats")))
+async def cmd_stats(message: Message):
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
+
+    duel_total = user.get("stat_duel_wins", 0) + user.get("stat_duel_losses", 0)
+    duel_wr = int(user.get("stat_duel_wins", 0) / duel_total * 100) if duel_total else 0
+
+    dice_total = user.get("stat_dice_wins", 0) + user.get("stat_dice_losses", 0)
+    dice_wr = int(user.get("stat_dice_wins", 0) / dice_total * 100) if dice_total else 0
+
+    bj_total = user.get("stat_blackjack_wins", 0) + user.get("stat_blackjack_losses", 0)
+    bj_wr = int(user.get("stat_blackjack_wins", 0) / bj_total * 100) if bj_total else 0
+
+    stock_total = user.get("stat_stock_wins", 0) + user.get("stat_stock_losses", 0)
+    stock_wr = int(user.get("stat_stock_wins", 0) / stock_total * 100) if stock_total else 0
+
+    await message.answer(
+        f"📊 <b>Статистика</b> {message.from_user.mention_html()}\n\n"
+        f"🛠 Смен отработано: <b>{user.get('stat_work_count', 0)}</b>\n\n"
+        f"⚔️ Дуэли: <b>{user.get('stat_duel_wins', 0)}</b>В / <b>{user.get('stat_duel_losses', 0)}</b>П "
+        f"({duel_wr}% побед)\n"
+        f"🎲 Кости: <b>{user.get('stat_dice_wins', 0)}</b>В / <b>{user.get('stat_dice_losses', 0)}</b>П "
+        f"({dice_wr}% побед)\n"
+        f"🃏 Покер — побед: <b>{user.get('stat_poker_wins', 0)}</b>\n"
+        f"🂡 Блекджек: <b>{user.get('stat_blackjack_wins', 0)}</b>В / "
+        f"<b>{user.get('stat_blackjack_losses', 0)}</b>П ({bj_wr}% побед)\n"
+        f"🎰 Слотов сыграно: <b>{user.get('stat_slots_played', 0)}</b>\n"
+        f"📈 Биржа: <b>{user.get('stat_stock_wins', 0)}</b>В / "
+        f"<b>{user.get('stat_stock_losses', 0)}</b>П ({stock_wr}% побед)\n\n"
+        f"🔥 Стрик ежедневного бонуса: <b>{user.get('daily_streak', 0)}</b> дн.\n"
+        f"🏠 Бизнесов: <b>{len(get_user_properties(user))}</b> "
+        f"({get_total_income_per_hour(user)}/ч пассивного дохода)"
     )
 # =====================================================================
 # КОСТИ (ДАЙСЫ)
@@ -5008,6 +5630,8 @@ async def dice_accept(callback: CallbackQuery):
 
     change_reputation(winner_id, +2)
     change_reputation(loser_id,  -1)
+    bump_stat(winner_id, "stat_dice_wins")
+    bump_stat(loser_id, "stat_dice_losses")
 
     await bot.send_message(chat_id,
         f"🏆 <b>ПОБЕДИТЕЛЬ — {winner_name}!</b>\n\n"
@@ -5102,6 +5726,7 @@ async def cmd_slots(message: Message):
     profit      = winnings - bet
     new_balance = user["balance"] - bet + winnings
     update_user(uid, balance=new_balance)
+    bump_stat(uid, "stat_slots_played")
 
     if profit > 0:
         change_reputation(uid, +1)
@@ -5546,37 +6171,41 @@ async def bj_finish(message_or_callback, game: dict, reason: str):
     d_bj = (len(game["dealer"]) == 2 and d_val == 21)
 
     if p_bj and not d_bj:
-        prize   = int(bet * 1.5)
-        result  = f"🃏 <b>БЛЕКДЖЕК!</b> +{prize} монет"
-        net     = prize
+        prize = int(bet * 1.5)
+        result = f"🃏 <b>БЛЕКДЖЕК!</b> +{prize} монет"
+        net = bet + prize  # возврат ставки + выигрыш 3:2
         change_reputation(user_id, +2)
     elif p_val > 21:
-        prize   = 0
-        result  = f"💥 <b>Перебор ({p_val})!</b> Проигрыш -{bet} монет"
-        net     = -bet
+        prize = 0
+        result = f"💥 <b>Перебор ({p_val})!</b> Проигрыш -{bet} монет"
+        net = 0
         change_reputation(user_id, -1)
     elif d_val > 21:
-        prize   = bet
-        result  = f"🎉 <b>Дилер перебрал ({d_val})!</b> +{bet} монет"
-        net     = prize
+        prize = bet
+        result = f"🎉 <b>Дилер перебрал ({d_val})!</b> +{prize} монет"
+        net = bet + prize
         change_reputation(user_id, +1)
     elif p_val > d_val:
-        prize   = bet
-        result  = f"🏆 <b>Победа! ({p_val} vs {d_val})</b> +{bet} монет"
-        net     = prize
+        prize = bet
+        result = f"🏆 <b>Победа! ({p_val} vs {d_val})</b> +{prize} монет"
+        net = bet + prize
         change_reputation(user_id, +1)
     elif p_val < d_val:
-        prize   = 0
-        result  = f"😢 <b>Проигрыш ({p_val} vs {d_val})</b> -{bet} монет"
-        net     = -bet
+        prize = 0
+        result = f"😢 <b>Проигрыш ({p_val} vs {d_val})</b> -{bet} монет"
+        net = 0
         change_reputation(user_id, -1)
     else:
-        prize   = 0
-        result  = f"🤝 <b>Ничья ({p_val})</b> — ставка возвращена"
-        net     = 0
-
+        prize = 0
+        result = f"🤝 <b>Ничья ({p_val})</b> — ставка возвращена"
+        net = bet  # только возврат ставки, без профита
     new_balance = balance + net
+    if net > bet or (p_bj and not d_bj) or d_val > 21 or p_val > d_val:
+        bump_stat(user_id, "stat_blackjack_wins")
+    elif p_val > 21 or p_val < d_val:
+        bump_stat(user_id, "stat_blackjack_losses")
     update_user(user_id, balance=new_balance)
+
 
     if game["user_id"] in bj_games:
         del bj_games[game["user_id"]]
