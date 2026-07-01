@@ -24,7 +24,7 @@ BOT_TOKEN    = os.getenv("BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 ADMIN_ID = 5908271287
-WORK_COOLDOWN     = 60
+WORK_COOLDOWN     = 300
 WORK_ENERGY_COST  = 15
 TRAIN_ENERGY_COST = 50
 
@@ -308,7 +308,7 @@ JOBS = {
         "description": "Продаёшь симиты из-под полы. Охрана в курсе.",
         "evolves_to":  "money_3",
         "req_level":   10,
-        "req_skill":   ("charisma_level", 2),
+        "req_skill": ("service_level", 2),
     },
     "money_3": {
         "name":        "Бариста в кофейне напротив ворот Манаса",
@@ -320,7 +320,7 @@ JOBS = {
         "description": "Льёшь латте студентам. Чаевые огонь.",
         "evolves_to":  "money_4",
         "req_level":   20,
-        "req_skill":   ("charisma_level", 3),
+        "req_skill":   ("service_level", 3),
         "req_item":    ("has_shaker", "🍹 Проф. шейкер"),
     },
     "money_4": {
@@ -333,7 +333,7 @@ JOBS = {
         "description": "Контролируешь все продажи в буфете. Касса звенит.",
         "evolves_to":  "money_5",
         "req_level":   35,
-        "req_skill":   ("charisma_level", 5),
+        "req_skill":   ("service_level", 5),
         "req_item":    ("has_shaker", "🍹 Проф. шейкер"),
     },
     "money_5": {
@@ -487,7 +487,7 @@ SHOP_ITEMS = {
         "price":       800,
         "flag":        "has_shaker",
         "description": "Нужен для ветки Деньги (10+ лвл). Даёт +1 к Харизме.",
-        "skill_bonus": ("charisma_level", 1),
+        "skill_bonus": ("service_level", 1),
     },
     "laptop": {
         "name":        "💻 Ноутбук",
@@ -639,6 +639,121 @@ CONSUMABLES = {
     },
 }
 
+BOSSES = {
+    "dorm_ghost": {
+        "name": "🏚 Дух общаги на Джале",
+        "min_level": 5,
+        "cooldown_hours": 4,
+        "energy_cost": 25,
+        "power_threshold": 40,
+        "reward_shards_min": 15, "reward_shards_max": 30,
+        "description": "По ночам в общаге кто-то двигает тапочки и включает чайник. Студенты боятся идти на кухню в одиночку.",
+        "win_text": "Дух признал в тебе своего и растворился, оставив горсть блестящих осколков.",
+        "lose_text": "Дух напугал тебя так, что ты забыл, зачем вообще пришёл. Отступление.",
+    },
+    "dekanat_phantom": {
+        "name": "📋 Призрак деканата с ведомостями",
+        "min_level": 15,
+        "cooldown_hours": 8,
+        "energy_cost": 30,
+        "power_threshold": 100,
+        "reward_shards_min": 30, "reward_shards_max": 55,
+        "description": "Бумажный дух бродит по коридорам в поисках должников по пересдачам. Ведомость в его руках никогда не заканчивается.",
+        "win_text": "Ты вырвал ведомость и сжёг её у фонтана. Призрак развеялся с воплем 'ну ладно, зачёт автоматом!'",
+        "lose_text": "Призрак вписал тебя в список на отчисление. К счастью, понарошку. Пока что.",
+    },
+    "somsynav_proctor": {
+        "name": "🕴 Проктор Сом-сынава",
+        "min_level": 30,
+        "cooldown_hours": 12,
+        "energy_cost": 35,
+        "power_threshold": 220,
+        "reward_shards_min": 55, "reward_shards_max": 90,
+        "description": "Легендарный надзиратель экзаменов, видящий шпаргалки сквозь стены. Ходят слухи, что он не моргает уже 12 лет.",
+        "win_text": "Ты выдержал его взгляд, не моргнув. Проктор молча кивнул и исчез в облаке мела.",
+        "lose_text": "Проктор заметил твою шпаргалку раньше, чем ты её достал. Позорное изгнание из аудитории.",
+    },
+    "minobr_commission": {
+        "name": "🏛 Комиссия Минобра",
+        "min_level": 50,
+        "cooldown_hours": 24,
+        "energy_cost": 40,
+        "power_threshold": 420,
+        "reward_shards_min": 100, "reward_shards_max": 160,
+        "description": "Внезапная проверка из столицы. Три человека в костюмах, ни один не улыбнулся с 2019 года.",
+        "win_text": "Комиссия не нашла нарушений. Более того — один из них тайком спросил, где тут столовая с чорбо.",
+        "lose_text": "Комиссия составила акт на 40 страниц. Читать его придётся весь семестр.",
+    },
+    "manas_spirit": {
+        "name": "🐎 Дух великого эпоса Манас",
+        "min_level": 80,
+        "cooldown_hours": 48,
+        "energy_cost": 50,
+        "power_threshold": 750,
+        "reward_shards_min": 200, "reward_shards_max": 320,
+        "description": "Финальное испытание. Дух самого эпоса является лишь тем, кто прошёл путь от новичка до легенды КТУ.",
+        "win_text": "Дух Манаса склонил голову. 'Ты достоин носить имя батыра университета.' Осколки эпоса теперь твои.",
+        "lose_text": "Дух эпоса лишь усмехнулся твоей самонадеянности. Возвращайся, когда станешь сильнее.",
+    },
+}
+
+BOSS_ITEMS = {
+    # ── Обычные ──
+    "old_conspectus": {
+        "name": "📓 Конспект прошлого курса", "rarity": "common", "rarity_label": "⚪ Обычный",
+        "bonus_type": "xp", "base_bonus": 4,
+        "description": "Мятые записи неизвестного отличника. Помогают учиться быстрее.",
+        "weight": 45, "upgrade_cost_base": 150,
+    },
+    "ktu_scarf": {
+        "name": "🧣 Шарф КТУ «Манас»", "rarity": "common", "rarity_label": "⚪ Обычный",
+        "bonus_type": "coins", "base_bonus": 4,
+        "description": "Официальный мерч. Почему-то придаёт уверенности на подработках.",
+        "weight": 45, "upgrade_cost_base": 150,
+    },
+    # ── Редкие ──
+    "starosta_watch": {
+        "name": "⌚ Часы старосты группы", "rarity": "rare", "rarity_label": "🔵 Редкий",
+        "bonus_type": "xp", "base_bonus": 8,
+        "description": "Всегда показывают, сколько осталось до конца пары. И до конца твоего терпения.",
+        "weight": 22, "upgrade_cost_base": 300,
+    },
+    "dean_beads": {
+        "name": "📿 Чётки декана", "rarity": "rare", "rarity_label": "🔵 Редкий",
+        "bonus_type": "luck", "base_bonus": 6,
+        "description": "Помогают декану сохранять спокойствие. Тебе — тоже.",
+        "weight": 20, "upgrade_cost_base": 300,
+    },
+    # ── Эпические ──
+    "kementai_cloak": {
+        "name": "🥋 Кементай — войлочный плащ кочевника", "rarity": "epic", "rarity_label": "🟣 Эпик",
+        "bonus_type": "luck", "base_bonus": 12,
+        "description": "Традиционный плащ пастухов Тянь-Шаня. Защищает от невзгод и плохих оценок.",
+        "weight": 9, "upgrade_cost_base": 700,
+    },
+    "akinak_sword": {
+        "name": "🗡 Акинак — меч древних кочевников", "rarity": "epic", "rarity_label": "🟣 Эпик",
+        "bonus_type": "coins", "base_bonus": 14,
+        "description": "Найден в степи под Бишкеком. Работодатели почему-то боятся торговаться при виде него.",
+        "weight": 8, "upgrade_cost_base": 700,
+    },
+    # ── Легендарные ──
+    "manas_bow": {
+        "name": "🏹 Лук Манаса", "rarity": "legendary", "rarity_label": "🟡 Легендарный",
+        "bonus_type": "both", "base_bonus": 20,
+        "description": "Оружие самого батыра из эпоса. Монеты и опыт текут рекой.",
+        "weight": 2, "upgrade_cost_base": 1500,
+    },
+    "rector_crown": {
+        "name": "👑 Корона Ректора", "rarity": "legendary", "rarity_label": "🟡 Легендарный",
+        "bonus_type": "both", "base_bonus": 22,
+        "description": "Символ абсолютной власти в стенах КТУ. Все двери открыты.",
+        "weight": 1, "upgrade_cost_base": 1500,
+    },
+}
+
+RARITY_ORDER = ["common", "rare", "epic", "legendary"]
+
 # =====================================================================
 # НЕДВИЖИМОСТЬ / ПАССИВНЫЙ ДОХОД
 # =====================================================================
@@ -723,7 +838,7 @@ def build_properties_text(user: dict) -> str:
     now = int(time.time())
     last = user.get("last_income_collect", 0) or now
     elapsed_h = min((now - last) / 3600, PASSIVE_INCOME_CAP_HOURS)
-    pending = int(total_income * elapsed_h)
+    pending = apply_full_coin_bonus(user, int(total_income * elapsed_h))
 
     lines = [
         "🏠 <b>Недвижимость и бизнесы</b>\n",
@@ -771,7 +886,6 @@ def get_properties_keyboard(user: dict) -> InlineKeyboardMarkup:
     builder.adjust(1)
     return builder.as_markup()
 
-
 def do_buy_property(user: dict, prop_key: str) -> tuple[bool, str]:
     prop = PROPERTIES.get(prop_key)
     if not prop:
@@ -781,20 +895,29 @@ def do_buy_property(user: dict, prop_key: str) -> tuple[bool, str]:
         return False, "У тебя уже есть этот объект!"
     if user["level"] < prop["min_level"]:
         return False, f"❌ Нужен уровень <b>{prop['min_level']}</b>."
-    if user["balance"] < prop["price"]:
-        return False, f"❌ Недостаточно монет. Нужно {prop['price']}."
+
+    _, _, _, ev_discount = get_event_multipliers()
+    actual_price = int(prop["price"] * (1 - ev_discount / 100))
+
+    if user["balance"] < actual_price:
+        return False, f"❌ Недостаточно монет. Нужно {actual_price}."
 
     props[prop_key] = int(time.time())
     save_user_properties(user["user_id"], props)
-    new_balance = user["balance"] - prop["price"]
+    new_balance = user["balance"] - actual_price
     last_collect = user.get("last_income_collect", 0) or int(time.time())
     update_user(
         user["user_id"],
         balance=new_balance,
         last_income_collect=last_collect or int(time.time()),
     )
-    return True, f"✅ Куплено: {prop['name']}!\n💰 Потрачено: {prop['price']} монет."
+    change_reputation(user["user_id"], +2)
 
+    updated = get_user(user["user_id"])
+    ach_msgs = check_and_grant_achievements(updated) if updated else []
+    ach_block = ("\n\n" + "\n".join(ach_msgs)) if ach_msgs else ""
+
+    return True, f"✅ Куплено: {prop['name']}!\n💰 Потрачено: {actual_price} монет.{ach_block}"
 
 def do_collect_income(user: dict) -> tuple[bool, str]:
     total_income = get_total_income_per_hour(user)
@@ -804,13 +927,16 @@ def do_collect_income(user: dict) -> tuple[bool, str]:
     now = int(time.time())
     last = user.get("last_income_collect", 0) or now
     elapsed_h = min((now - last) / 3600, PASSIVE_INCOME_CAP_HOURS)
-    pending = int(total_income * elapsed_h)
+    pending = apply_full_coin_bonus(user, int(total_income * elapsed_h))
 
     if pending <= 0:
         return False, "⏳ Пока нечего собирать, доход ещё капает."
 
     new_balance = user["balance"] + pending
     update_user(user["user_id"], balance=new_balance, last_income_collect=now)
+    updated = get_user(user["user_id"])
+    if updated:
+        check_and_grant_achievements(updated)
     return True, (
         f"💰 Собран пассивный доход: <b>+{pending}</b> монет!\n"
         f"📊 Баланс: <b>{new_balance}</b> монет"
@@ -831,10 +957,10 @@ SKILL_CONFIG = {
         "description": "Нужно для ветки Баланс. Требует 🛵 Скутер.",
         "unlock_item": "has_scooter",
     },
-    "charisma_level": {
-        "label":       "✨ Харизма",
+    "service_level": {
+        "label":       "🛎 Сервис",
         "cost_base":   500,
-        "description": "Нужна для ветки Деньги. Требует 🍹 Шейкер.",
+        "description": "Нужен для ветки Деньги. Требует 🍹 Шейкер.",
         "unlock_item": "has_shaker",
     },
     "organization_level": {
@@ -975,6 +1101,36 @@ ACHIEVEMENTS = {
         "reward_coins": 500,
         "reward_exp":   200,
     },
+    "married": {
+        "name":        "💍 Молодожён",
+        "description": "Вступи в брак",
+        "reward_coins": 500,
+        "reward_exp":   200,
+    },
+    "first_property": {
+        "name":        "🏠 Первая инвестиция",
+        "description": "Купи свою первую недвижимость",
+        "reward_coins": 300,
+        "reward_exp":   100,
+    },
+    "real_estate_king": {
+        "name":        "🏙 Король недвижимости",
+        "description": "Купи всю недвижимость",
+        "reward_coins": 8000,
+        "reward_exp":   2500,
+    },
+    "first_boss_kill": {
+        "name": "⚔️ Охотник на духов", "description": "Победи первого босса",
+        "reward_coins": 300, "reward_exp": 100,
+    },
+    "boss_legend": {
+        "name": "🌟 Легендарная добыча", "description": "Получи легендарный предмет с босса",
+        "reward_coins": 3000, "reward_exp": 1000,
+    },
+    "all_bosses": {
+        "name": "🐎 Батыр КТУ", "description": "Победи всех 5 боссов хотя бы раз",
+        "reward_coins": 10000, "reward_exp": 3000,
+    },
 }
 
 # =====================================================================
@@ -1043,6 +1199,18 @@ TITLES = {
         "bonus_coins": 10, "bonus_xp": 10, "bonus_luck": 10,
         "description": "Особый статус от администрации.",
         "condition": None,
+    },
+    "family": {
+        "name": "💑 Семьянин", "admin_only": False,
+        "bonus_coins": 3, "bonus_xp": 3, "bonus_luck": 0,
+        "description": "Состой в браке.",
+        "condition": lambda u: u.get("spouse_id") is not None,
+    },
+    "batyr": {
+        "name": "🐎 Батыр", "admin_only": False,
+        "bonus_coins": 8, "bonus_xp": 8, "bonus_luck": 5,
+        "description": "Победи всех боссов КТУ.",
+        "condition": lambda u: all(k in get_boss_cooldowns(u) for k in BOSSES),
     },
 }
 
@@ -1134,7 +1302,15 @@ def check_and_grant_achievements(user: dict) -> list[str]:
     _try("train_10",      (user["intellect"] + user["endurance"]) >= 20)
     _try("all_items",     all(user.get(item["flag"]) for item in SHOP_ITEMS.values()))
     _try("skill_max",     any(user.get(sk, 0) >= 10 for sk in SKILL_CONFIG))
-
+    props = get_user_properties(user)
+    _try("first_property", len(props) >= 1)
+    _try("real_estate_king", all(k in props for k in PROPERTIES))
+    _try("married", bool(user.get("spouse_id")))
+    _try("first_boss_kill", user.get("stat_boss_kills", 0) >= 1)
+    boss_items_owned = get_boss_items(user)
+    _try("boss_legend", any(BOSS_ITEMS[k]["rarity"] == "legendary" for k in boss_items_owned if k in BOSS_ITEMS))
+    cds = get_boss_cooldowns(user)
+    _try("all_bosses", all(k in cds for k in BOSSES))
     if new_achs:
         save_achievements(user["user_id"], owned)
         total_coins = 0
@@ -1182,7 +1358,7 @@ def init_db():
 
                     communication_level   INTEGER DEFAULT 1,
                     driving_level         INTEGER DEFAULT 0,
-                    charisma_level        INTEGER DEFAULT 0,
+                    service_level        INTEGER DEFAULT 0,
                     organization_level    INTEGER DEFAULT 0,
                     management_level      INTEGER DEFAULT 0,
 
@@ -1209,6 +1385,21 @@ def init_db():
                     achievements          TEXT    DEFAULT ''
                 )
             """)
+            # миграция: переименование старого скилла charisma_level -> service_level
+            try:
+                with get_conn() as conn2:
+                    with conn2.cursor() as cur2:
+                        cur2.execute("""
+                                     SELECT column_name
+                                     FROM information_schema.columns
+                                     WHERE table_name = 'users'
+                                       AND column_name = 'charisma_level'
+                                     """)
+                        if cur2.fetchone():
+                            cur2.execute("ALTER TABLE users RENAME COLUMN charisma_level TO service_level")
+                    conn2.commit()
+            except Exception:
+                pass
             cur.execute("""
                         CREATE TABLE IF NOT EXISTS event_chats
                         (
@@ -1267,6 +1458,13 @@ def init_db():
                 ("stat_slots_played", "INTEGER DEFAULT 0"),
                 ("stat_stock_wins", "INTEGER DEFAULT 0"),
                 ("stat_stock_losses", "INTEGER DEFAULT 0"),
+                ("spouse_id", "BIGINT DEFAULT NULL"),
+                ("married_at", "INTEGER DEFAULT 0"),
+                ("shards", "INTEGER DEFAULT 0"),
+                ("boss_items", "TEXT DEFAULT '{}'"),
+                ("equipped_boss_item", "TEXT DEFAULT ''"),
+                ("boss_cooldowns", "TEXT DEFAULT '{}'"),
+                ("stat_boss_kills", "INTEGER DEFAULT 0"),
             ]:
                 try:
                     with get_conn() as conn:  # <-- отдельное соединение на каждый ALTER
@@ -1562,11 +1760,12 @@ def do_work(user: dict) -> tuple[bool, str]:
     if user["job"] == "Безработный":
         return False, "❌ Сначала выбери профессию через <b>💼 Профессии</b>!"
 
-    now     = int(time.time())
+    now = int(time.time())
+    cooldown = get_work_cooldown(user)
     elapsed = now - user["last_work_time"]
-    if elapsed < WORK_COOLDOWN:
-        remaining = WORK_COOLDOWN - elapsed
-        return False, f"⏳ Подожди ещё <b>{remaining}</b> сек."
+    if elapsed < cooldown:
+        remaining = cooldown - elapsed
+        return False, f"⏳ Подожди ещё <b>{remaining}</b> сек. (кулдаун {cooldown}с — 🏃 Ловкость сокращает)"
 
     if user["energy"] < WORK_ENERGY_COST:
         max_e = get_max_energy(user)
@@ -1655,16 +1854,19 @@ def do_work(user: dict) -> tuple[bool, str]:
     quest_msgs += update_quest_progress(user["user_id"], "earn", earned_coins)
     quest_block = ("\n\n" + "\n".join(quest_msgs)) if quest_msgs else ""
 
+    luck_ach_msg = None
     if event_line:
         if "🔥" in event_line:
             change_reputation(user["user_id"], +1)
+            luck_ach_msg = grant_achievement_now(user["user_id"], "luck_event")
         elif "⚠️" in event_line:
             change_reputation(user["user_id"], -1)
     change_reputation(user["user_id"], +1)  # за работу всегда +1
     bump_stat(user["user_id"], "stat_work_count")
     event_block = f"\n\n{event_prefix}{event_line}" if event_line else ""
-    max_energy  = get_max_energy(user)
-
+    if luck_ach_msg:
+        event_block += f"\n\n{luck_ach_msg}"
+    max_energy = get_max_energy(user)
     return True, (
         f"🛠 Ты поработал как <b>{user['job']}</b>!"
         f"{event_block}\n\n"
@@ -1677,7 +1879,24 @@ def do_work(user: dict) -> tuple[bool, str]:
         f"{title_block}"
         f"{quest_block}"
     )
+def get_work_cooldown(user: dict) -> int:
+    """1 сек. кулдауна снимается за каждые 3 Ловкости, максимум -180 сек, минимум 60 сек."""
+    agility = user.get("agility", 1)
+    reduction = min(180, agility // 3)
+    return max(60, WORK_COOLDOWN - reduction)
 
+def get_charisma_shop_discount(user: dict) -> int:
+    """1% скидки за каждые 20 Харизмы, максимум 15%."""
+    charisma = user.get("charisma", 1)
+    return min(15, charisma // 20)
+
+
+def apply_price_modifiers(user: dict, price: int) -> int:
+    """Скидка/наценка от репутации + скидка от Харизмы, суммарно ограничено -50%..+50%."""
+    rep_discount = get_rep_discount(user.get("reputation", 0))
+    cha_discount = get_charisma_shop_discount(user)
+    total = max(-50, min(50, rep_discount + cha_discount))
+    return max(1, int(price * (1 - total / 100)))
 # =====================================================================
 # ЛОГИКА: НАВЫКИ
 # =====================================================================
@@ -1740,14 +1959,20 @@ TRAIN_CONFIG = {
     "agility":   {"name": "🤸 Акробатика",            "stat_label": "🏃 Ловкость",     "active": False},
     "charisma":  {"name": "🎤 Публичное выступление", "stat_label": "✨ Харизма",       "active": False},
 }
-
+def get_stat_train_cap(user: dict) -> int:
+    """Лимит стата, накачиваемого тренировкой: 10 на 1 lvl, 20 на 2 lvl и т.д."""
+    return user["level"] * 10
 def build_training_text(user: dict) -> str:
     max_energy = get_max_energy(user)
+    cap = get_stat_train_cap(user)
     return (
         f"🏋️ <b>Тренировки</b>\n\n"
         f"⚡ Энергия: <b>{user['energy']}</b> / {max_energy}\n\n"
         f"Тренировки тратят <b>{TRAIN_ENERGY_COST} ⚡</b> и прокачивают характеристики.\n"
-        f"<i>⚡ Энергия восстанавливается только расходниками из Магазина!</i>"
+        f"📈 Лимит тренировки на твоём уровне: <b>{cap}</b> (растёт с уровнем: 10 на 1 lvl, 20 на 2 lvl...)\n"
+        f"<i>⚡ Энергия восстанавливается только расходниками из Магазина!</i>\n\n"
+       f"🏃 Ловкость: -1 сек. кулдауна работы за каждые 5 ед. (сейчас: {get_work_cooldown(user)}с)\n"
+        f"✨ Харизма: скидка в 🛒 Магазине (сейчас: -{get_charisma_shop_discount(user)}%)"
     )
 
 def get_training_keyboard() -> InlineKeyboardMarkup:
@@ -1761,11 +1986,11 @@ def get_training_keyboard() -> InlineKeyboardMarkup:
         callback_data=TrainCallback(stat="endurance").pack()
     )
     builder.button(
-        text="🤸 Акробатика  (-50 ⚡) → +1 🏃 Ловкость  [Скоро]",
+        text=f"🤸 Акробатика  (-{TRAIN_ENERGY_COST} ⚡) → +1 🏃 Ловкость",
         callback_data=TrainCallback(stat="agility").pack()
     )
     builder.button(
-        text="🎤 Выступление  (-50 ⚡) → +1 ✨ Харизма  [Скоро]",
+        text=f"🎤 Выступление  (-{TRAIN_ENERGY_COST} ⚡) → +1 ✨ Харизма",
         callback_data=TrainCallback(stat="charisma").pack()
     )
     builder.adjust(1)
@@ -1783,18 +2008,27 @@ def do_train(user: dict, stat: str) -> tuple[bool, str]:
             f"Нужно: <b>{TRAIN_ENERGY_COST} ⚡</b>, есть: <b>{user['energy']} ⚡</b>.\n"
             f"Купи расходник в 🛒 Магазине."
         )
+
+    cap = get_stat_train_cap(user)
+    current_val = user[stat]
+    if current_val >= cap:
+        return False, (
+            f"📈 <b>{cfg['stat_label']}</b> уже на пределе для твоего уровня!\n"
+            f"Лимит тренировки: <b>{cap}</b> (10 × уровень {user['level']}).\n"
+            f"Повысь уровень, чтобы качать дальше."
+        )
+
     new_energy = max(0, user["energy"] - TRAIN_ENERGY_COST)
-    new_stat   = user[stat] + 1
+    new_stat   = current_val + 1
     update_user(user["user_id"], energy=new_energy, **{stat: new_stat})
     quest_msgs = update_quest_progress(user["user_id"], "train")
     updated    = {**user, stat: new_stat, "energy": new_energy}
     max_energy = get_max_energy(updated)
     return True, (
         f"✅ <b>{cfg['name']}</b> завершена!\n\n"
-        f"{cfg['stat_label']}: <b>+1</b> → {new_stat}\n"
+        f"{cfg['stat_label']}: <b>+1</b> → {new_stat} / {cap} (лимит уровня)\n"
         f"⚡ Энергия: <b>{new_energy}</b> / {max_energy}  (-{TRAIN_ENERGY_COST})"
     )
-
 # =====================================================================
 # ЛОГИКА: МАГАЗИН
 # =====================================================================
@@ -1821,12 +2055,29 @@ def get_shop_gear_keyboard() -> InlineKeyboardMarkup:
     builder.adjust(1)
     return builder.as_markup()
 
+def build_food_category_text(user: dict) -> str:
+    lines = ["🍔 <b>Еда и расходники</b>\n"]
+    for item in CONSUMABLES.values():
+        effects = []
+        if item["hp"] > 0: effects.append(f"+{min(item['hp'],9999)} HP")
+        if item["energy"] > 0: effects.append(f"+{min(item['energy'],9999)} ⚡")
+        if item["hp"] >= 9999 and item["energy"] >= 9999: effects = ["полное восстановление"]
+        lines.append(
+            f"{item['name']} — <b>{item['price']} монет</b>  ({', '.join(effects)})\n"
+            f"  <i>{item['description']}</i>"
+        )
+    lines.append(f"\n💰 Баланс: <b>{user['balance']}</b> монет")
+    return "\n".join(lines)
+
 def get_shop_food_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for key, item in CONSUMABLES.items():
-        builder.button(text=f"{item['name']} — {item['price']} монет", callback_data=f"consume:{key}")
+        builder.button(text=f"{item['name']} x1",  callback_data=f"consume:{key}:1")
+        builder.button(text="x5",  callback_data=f"consume:{key}:5")
+        builder.button(text="x10", callback_data=f"consume:{key}:10")
     builder.button(text="◀ Назад", callback_data="shop_back")
-    builder.adjust(1)
+    sizes = [3] * len(CONSUMABLES) + [1]
+    builder.adjust(*sizes)
     return builder.as_markup()
 
 
@@ -1838,7 +2089,7 @@ def do_buy_item(user: dict, item_key: str) -> tuple[bool, str]:
         return False, f"У тебя уже есть {item['name']}!"
     _, _, _, ev_discount = get_event_multipliers()
     base_price = int(item["price"] * (1 - ev_discount / 100))
-    actual_price = apply_rep_to_price(user, base_price)
+    actual_price = apply_price_modifiers(user, base_price)
     if user["balance"] < actual_price:
         return False, (
             f"❌ Недостаточно монет.\n"
@@ -1868,38 +2119,42 @@ def do_buy_item(user: dict, item_key: str) -> tuple[bool, str]:
     )
 
 
-def do_use_consumable(user: dict, item_key: str) -> tuple[bool, str]:
+def do_use_consumable(user: dict, item_key: str, quantity: int = 1) -> tuple[bool, str]:
     item = CONSUMABLES.get(item_key)
     if not item:
         return False, "❌ Такого предмета нет."
+    quantity = max(1, min(quantity, 50))  # защита от абсурдных значений
+
     _, _, _, ev_discount = get_event_multipliers()
-    base_price = int(item["price"] * (1 - ev_discount / 100))
+    base_price = int(item["price"] * quantity * (1 - ev_discount / 100))
     actual_price = apply_rep_to_price(user, base_price)
+
     if user["balance"] < actual_price:
         return False, (
             f"❌ Недостаточно монет.\n"
             f"Нужно: <b>{actual_price}</b>, есть: <b>{user['balance']}</b>."
         )
+
     max_hp     = get_max_hp(user)
     max_energy = get_max_energy(user)
     old_hp     = user["hp"]
     old_energy = user["energy"]
-    new_hp     = min(max_hp,     old_hp     + item["hp"])
-    new_energy = min(max_energy, old_energy + item["energy"])
+    new_hp     = min(max_hp,     old_hp     + item["hp"]     * quantity)
+    new_energy = min(max_energy, old_energy + item["energy"] * quantity)
     new_balance = user["balance"] - actual_price
+
     update_user(user["user_id"], hp=new_hp, energy=new_energy, balance=new_balance)
-    update_quest_progress(user["user_id"], "spend", item["price"])
+    update_quest_progress(user["user_id"], "spend", item["price"] * quantity)
 
     gained_hp     = new_hp     - old_hp
     gained_energy = new_energy - old_energy
-    lines = [f"✅ Использован {item['name']}!"]
+    lines = [f"✅ Использовано {item['name']} x<b>{quantity}</b>!"]
     if gained_hp     > 0: lines.append(f"❤️ HP:     +{gained_hp} → {new_hp} / {max_hp}")
     if gained_energy > 0: lines.append(f"⚡ Энергия: +{gained_energy} → {new_energy} / {max_energy}")
     if gained_hp == 0 and gained_energy == 0:
-        lines.append("ℹ️ Ресурсы уже на максимуме — предмет потрачен впустую!")
-    lines.append(f"💰 Потрачено: {item['price']} монет")
+        lines.append("ℹ️ Ресурсы уже на максимуме — часть предметов потрачена впустую!")
+    lines.append(f"💰 Потрачено: {actual_price} монет")
     return True, "\n".join(lines)
-
 # =====================================================================
 # ПРОФИЛЬ
 # =====================================================================
@@ -1915,6 +2170,13 @@ def build_profile_text(user: dict, mention: str) -> str:
     rep_title, _ = get_rep_title(rep)
     active_title = user.get("active_title", "")
     title_line = f"🎖 Титул: <b>{TITLES[active_title]['name']}</b>\n" if active_title in TITLES else ""
+    spouse_id_val = user.get("spouse_id")
+    spouse_line = ""
+    if spouse_id_val:
+        spouse_data = get_user(spouse_id_val)
+        if spouse_data:
+            spouse_name_val = spouse_data.get("username") or f"#{spouse_id_val}"
+            spouse_line = f"💍 Супруг(а): <b>{spouse_name_val}</b>\n"
 
     inv_parts = []
     for key, item in SHOP_ITEMS.items():
@@ -1936,9 +2198,11 @@ def build_profile_text(user: dict, mention: str) -> str:
         + (f"  [Грейд {grade}/9, Ранг {rank}]" if grade > 0 else "") + "\n"
         f"{title_line}"                                                               
         f"⭐ Уровень: <b>{lvl}</b>\n"
-        f"⭐ Репутация:     <b>{rep}</b> ({rep_title})\n"                                                               
+        f"⭐ Репутация:     <b>{rep}</b> ({rep_title})\n" 
+        f"{spouse_line}"                                                               
         f"✨ Опыт: <b>{user['exp']}</b> / {needed_xp}\n"
         f"💰 Баланс: <b>{user['balance']}</b> монет\n\n"
+        f"🔶 Осколки: <b>{user.get('shards', 0)}</b>\n\n"                                                               
         f"━━━ 💗 Ресурсы ━━━\n"
         f"❤️ Здоровье:  <b>{user['hp']}</b> / {max_hp}\n"
         f"⚡ Энергия:   <b>{user['energy']}</b> / {max_energy}\n"
@@ -1976,6 +2240,13 @@ def get_main_menu() -> ReplyKeyboardMarkup:
 # =====================================================================
 STOCK_MIN_BET = 100
 STOCK_OUTCOMES = ["ап"] * 18 + ["давн"] * 18 + ["нейтрал"] * 2
+
+# Множитель выплаты (сколько раз от ставки игрок получает как ПРОФИТ, помимо возврата ставки)
+STOCK_PAYOUT_MULT = {
+    "ап":      1,
+    "давн":    1,
+    "нейтрал": 20,   # редкий исход (2/38 ≈ 5.3%) — джекпот
+}
 
 STOCK_LABELS = {
     "ап":      "📈 АП (рынок вырос)",
@@ -2020,11 +2291,13 @@ def do_stock_bet(user: dict, outcome_input: str, bet: int) -> tuple[bool, str]:
     won           = (outcome_input == market_result)
 
     if won:
-        new_balance = user["balance"] + bet
+        profit = apply_full_coin_bonus(user, bet)
+        new_balance = user["balance"] + profit
         update_user(user["user_id"], balance=new_balance)
         change_reputation(user["user_id"], +1)
         bump_stat(user["user_id"], "stat_stock_wins")
         update_quest_progress(user["user_id"], "stock")
+        stock_ach_msg = grant_achievement_now(user["user_id"], "stock_win")
         updated = get_user(user["user_id"])
         if updated:
             check_and_grant_achievements(updated)
@@ -2034,9 +2307,11 @@ def do_stock_bet(user: dict, outcome_input: str, bet: int) -> tuple[bool, str]:
             f"График пошёл: <b>{market_label}</b>\n\n"
             f"🎉 <b>Вы угадали тренд!</b>\n"
             f"{phrase}\n\n"
-            f"💰 Выигрыш: <b>+{bet}</b> монет\n"
+            f"💰 Выигрыш: <b>+{profit}</b> монет\n"
             f"📈 Баланс: <b>{new_balance}</b> монет"
         )
+        if stock_ach_msg:
+            text += f"\n\n{stock_ach_msg}"
     else:
         new_balance = user["balance"] - bet
         update_user(user["user_id"], balance=new_balance)
@@ -2055,7 +2330,6 @@ def do_stock_bet(user: dict, outcome_input: str, bet: int) -> tuple[bool, str]:
         )
 
     return True, text
-
 
 # =====================================================================
 # МОДУЛЬ «БУНКЕР»
@@ -3501,15 +3775,19 @@ async def _poker_next_turn(message: Message, game: PokerGame):
 async def _poker_end_single(message: Message, game: PokerGame, winner_id: int):
     winner = game.players[winner_id]
     new_bal = winner["balance"] + game.pot
-    bump_stat(winner_id, "stat_poker_wins")  # в _poker_end_single
+    bump_stat(winner_id, "stat_poker_wins")
     update_user(winner_id, balance=new_bal)
+    ach_msg = grant_achievement_now(winner_id, "poker_win")
 
-    await message.answer(
+    text = (
         f"🏆 Все остальные сбросили карты!\n\n"
         f"🥇 Победитель: <b>{winner['name']}</b>\n"
         f"💰 Выигрыш: <b>{game.pot}</b> монет\n"
         f"💳 Новый баланс: <b>{new_bal}</b> монет"
     )
+    if ach_msg:
+        text += f"\n\n{ach_msg}"
+    await message.answer(text)
     if game.chat_id in poker_games:
         del poker_games[game.chat_id]
 
@@ -3533,12 +3811,16 @@ async def _poker_showdown(message: Message, game: PokerGame):
         if prize > 0:
             new_bal = game.players[uid]["balance"] + prize
             update_user(uid, balance=new_bal)
-            bump_stat(uid, "stat_poker_wins")  # в _poker_showdown, внутри цикла winners_text
-            winners_text.append(
+            bump_stat(uid, "stat_poker_wins")
+            ach_msg = grant_achievement_now(uid, "poker_win")
+            line = (
                 f"🥇 <b>{game.players[uid]['name']}</b> "
                 f"выигрывает <b>{prize}</b> монет! "
                 f"(баланс: {new_bal})"
             )
+            if ach_msg:
+                line += f"\n{ach_msg}"
+            winners_text.append(line)
 
     lines.append("\n".join(winners_text))
     await message.answer("\n".join(lines))
@@ -3940,7 +4222,7 @@ async def cmd_start_group(message: Message):
     )
 
 @dp.message(F.chat.type.in_({"group", "supergroup"}),
-            F.text.func(lambda t: t and _is(t, "профиль", "profile")))
+            F.text.func(lambda t: t and _is(t, "профиль", "profile", "перс", "персонаж")))
 async def txt_profile_group(message: Message):
     user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
     await message.answer(build_profile_text(user, message.from_user.mention_html()))
@@ -4142,7 +4424,7 @@ async def callback_shop_gear(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "shop_cat:food")
 async def callback_shop_food(callback: CallbackQuery):
-    user  = get_user_safe(callback.from_user.id)
+    user = get_user_safe(callback.from_user.id)
     lines = ["🍔 <b>Еда и расходники</b>\n"]
     for item in CONSUMABLES.values():
         effects = []
@@ -4152,22 +4434,23 @@ async def callback_shop_food(callback: CallbackQuery):
         lines.append(f"{item['name']} — <b>{item['price']} монет</b>  ({', '.join(effects)})\n  <i>{item['description']}</i>")
     lines.append(f"\n💰 Баланс: <b>{user['balance']}</b> монет")
     await callback.answer()
-    await callback.message.edit_text("\n".join(lines), reply_markup=get_shop_food_keyboard())
+    await callback.message.edit_text(build_food_category_text(user), reply_markup=get_shop_food_keyboard())
 
 @dp.callback_query(F.data.startswith("consume:"))
 async def callback_use_consumable(callback: CallbackQuery):
-    item_key = callback.data.split(":")[1]
-    user     = get_user_safe(callback.from_user.id)
-    success, text = do_use_consumable(user, item_key)
+    parts     = callback.data.split(":")
+    item_key  = parts[1]
+    quantity  = int(parts[2]) if len(parts) > 2 else 1
+    user      = get_user_safe(callback.from_user.id)
+    success, text = do_use_consumable(user, item_key, quantity)
     await callback.answer()
     await callback.message.answer(text)
     if success:
         updated = get_user(callback.from_user.id)
         await callback.message.edit_text(
-            build_shop_text(updated),
-            reply_markup=get_shop_keyboard()
+            build_food_category_text(updated),
+            reply_markup=get_shop_food_keyboard()
         )
-
 
 @dp.callback_query(TrainCallback.filter())
 async def callback_train(callback: CallbackQuery, callback_data: TrainCallback):
@@ -4378,7 +4661,7 @@ async def cmd_set_stat(message: Message):
     VALID_STATS = {
         "agility", "endurance", "charisma", "intellect", "luck",
         "level", "balance",
-        "communication_level", "driving_level", "charisma_level",
+        "communication_level", "driving_level", "service_level",
         "organization_level", "management_level",
     }
 
@@ -4496,6 +4779,225 @@ async def cmd_remove_title(message: Message):
         update_user(target_id, active_title="")
 
     await message.answer(f"✅ Титул <code>{title_key}</code> снят с пользователя <code>{target_id}</code>")
+
+@dp.message(Command("eat"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("покушать", "кушать", "поесть", "eat")))
+async def cmd_eat_menu(message: Message):
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
+    await message.answer(build_food_category_text(user), reply_markup=get_shop_food_keyboard())
+
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("перс", "персонаж")), F.chat.type == "private")
+async def txt_profile_alias_private(message: Message):
+    await btn_profile_private(message)
+
+# =====================================================================
+# БРАКИ
+# =====================================================================
+active_marriage_proposals: dict[int, dict] = {}
+
+@dp.message(
+    F.chat.type.in_({"group", "supergroup"}),
+    F.text.func(lambda t: t and t.strip().lower().startswith("брак "))
+)
+async def marriage_propose(message: Message):
+    chat_id       = message.chat.id
+    proposer_id   = message.from_user.id
+    proposer_name = message.from_user.full_name
+
+    if chat_id in active_marriage_proposals:
+        await message.answer("💍 В этом чате уже есть незавершённое предложение!")
+        return
+
+    proposer = get_user_safe(proposer_id, message.from_user.username or proposer_name)
+    if proposer.get("spouse_id"):
+        await message.answer("❌ Ты уже в браке! Разведись командой <b>развод</b>.")
+        return
+
+    target_id   = None
+    target_name = None
+    if message.reply_to_message and message.reply_to_message.from_user:
+        ru = message.reply_to_message.from_user
+        if not ru.is_bot:
+            target_id, target_name = ru.id, ru.full_name
+    else:
+        if message.entities:
+            for ent in message.entities:
+                if ent.type == "text_mention" and ent.user:
+                    target_id, target_name = ent.user.id, ent.user.full_name
+                    break
+                elif ent.type == "mention":
+                    uname = message.text[ent.offset:ent.offset + ent.length]
+                    try:
+                        cm = await bot.get_chat_member(chat_id, uname)
+                        target_id, target_name = cm.user.id, cm.user.full_name
+                    except Exception:
+                        pass
+                    break
+
+    if not target_id:
+        await message.answer("❌ Укажи пользователя: <code>брак @username</code> или ответом на сообщение.")
+        return
+    if target_id == proposer_id:
+        await message.answer("❌ Нельзя жениться на себе!")
+        return
+
+    register_user(target_id)
+    target = get_user(target_id)
+    if not target:
+        await message.answer("❌ Этот пользователь ещё не зарегистрирован в игре.")
+        return
+    if target.get("spouse_id"):
+        await message.answer(f"❌ {target_name} уже состоит в браке!")
+        return
+
+    active_marriage_proposals[chat_id] = {
+        "proposer_id": proposer_id, "proposer_name": proposer_name,
+        "target_id": target_id, "target_name": target_name,
+    }
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="💍 Согласен(на)!", callback_data=f"marry_accept:{chat_id}:{target_id}")
+    builder.button(text="💔 Отказать",       callback_data=f"marry_decline:{chat_id}:{target_id}")
+    builder.adjust(2)
+
+    await message.answer(
+        f"💍 <b>ПРЕДЛОЖЕНИЕ РУКИ И СЕРДЦА!</b>\n\n"
+        f"👤 {proposer_name} делает предложение {target_name}!\n\n"
+        f"<a href='tg://user?id={target_id}'>{target_name}</a>, что скажешь?",
+        reply_markup=builder.as_markup()
+    )
+
+    async def auto_cancel():
+        await asyncio.sleep(120)
+        if chat_id in active_marriage_proposals:
+            del active_marriage_proposals[chat_id]
+            await message.answer(f"⏰ {target_name} не ответил(а). Предложение аннулировано.")
+    asyncio.create_task(auto_cancel())
+
+
+@dp.callback_query(F.data.startswith("marry_accept:"))
+async def marriage_accept(callback: CallbackQuery):
+    parts   = callback.data.split(":")
+    chat_id = int(parts[1])
+    tid     = int(parts[2])
+
+    if callback.from_user.id != tid:
+        await callback.answer("Это предложение не тебе!", show_alert=True)
+        return
+
+    proposal = active_marriage_proposals.get(chat_id)
+    if not proposal:
+        await callback.answer("Предложение уже недействительно.", show_alert=True)
+        return
+
+    proposer_id   = proposal["proposer_id"]
+    proposer_name = proposal["proposer_name"]
+    target_name   = proposal["target_name"]
+
+    proposer = get_user(proposer_id)
+    target   = get_user(tid)
+    if not proposer or not target:
+        del active_marriage_proposals[chat_id]
+        await callback.answer("Ошибка данных.", show_alert=True)
+        return
+    if proposer.get("spouse_id") or target.get("spouse_id"):
+        del active_marriage_proposals[chat_id]
+        await callback.answer("Один из вас уже успел жениться!", show_alert=True)
+        return
+
+    now = int(time.time())
+    update_user(proposer_id, spouse_id=tid, married_at=now)
+    update_user(tid, spouse_id=proposer_id, married_at=now)
+
+    del active_marriage_proposals[chat_id]
+    await callback.answer("💍 Поздравляем с браком!", show_alert=True)
+
+    extra_msgs = []
+    for uid_ in (proposer_id, tid):
+        u = get_user(uid_)
+        if u:
+            extra_msgs += check_and_grant_achievements(u)
+            extra_msgs += check_and_grant_titles(u)
+
+    text = (
+        f"🎉💍 <b>СВАДЬБА СОСТОЯЛАСЬ!</b>\n\n"
+        f"👰🤵 <b>{proposer_name}</b> и <b>{target_name}</b> теперь официально семья!\n"
+        f"Совет да любовь! 💕\n\n"
+        f"🎁 Брак даёт совместный бонус: +5% к монетам и опыту, "
+        f"а если оба супруга недавно работали — бонус удваивается!"
+    )
+    if extra_msgs:
+        text += "\n\n" + "\n".join(extra_msgs)
+    await callback.message.answer(text)
+
+@dp.callback_query(F.data.startswith("marry_decline:"))
+async def marriage_decline(callback: CallbackQuery):
+    parts   = callback.data.split(":")
+    chat_id = int(parts[1])
+    tid     = int(parts[2])
+
+    if callback.from_user.id != tid:
+        await callback.answer("Это предложение не тебе!", show_alert=True)
+        return
+
+    proposal = active_marriage_proposals.get(chat_id)
+    if not proposal:
+        await callback.answer("Предложение уже недействительно.", show_alert=True)
+        return
+
+    del active_marriage_proposals[chat_id]
+    await callback.answer()
+    await callback.message.answer(
+        f"💔 <b>{proposal['target_name']}</b> отклонил(а) предложение {proposal['proposer_name']}..."
+    )
+
+
+@dp.message(Command("divorce"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("развод", "divorce")))
+async def cmd_divorce(message: Message):
+    uid  = message.from_user.id
+    user = get_user_safe(uid, message.from_user.username or message.from_user.full_name)
+    spouse_id = user.get("spouse_id")
+    if not spouse_id:
+        await message.answer("❌ Ты не в браке.")
+        return
+
+    spouse = get_user(spouse_id)
+    update_user(uid, spouse_id=None, married_at=0)
+    update_user(spouse_id, spouse_id=None, married_at=0)
+
+    spouse_name = (spouse.get("username") if spouse else "") or f"#{spouse_id}"
+    await message.answer(f"💔 Ты развёлся(лась) с <b>{spouse_name}</b>. Свободен(на) как ветер!")
+
+
+@dp.message(Command("family"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("семья", "супруг", "family")))
+async def cmd_family(message: Message):
+    uid  = message.from_user.id
+    user = get_user_safe(uid, message.from_user.username or message.from_user.full_name)
+    spouse_id = user.get("spouse_id")
+    if not spouse_id:
+        await message.answer("💍 Ты не в браке.\nИспользуй <code>брак @username</code> в группе, чтобы сделать предложение!")
+        return
+
+    spouse = get_user(spouse_id)
+    if not spouse:
+        update_user(uid, spouse_id=None, married_at=0)
+        await message.answer("⚠️ Супруг(а) не найден(а) в базе. Брак аннулирован.")
+        return
+
+    married_at  = user.get("married_at", 0)
+    days        = max(0, (int(time.time()) - married_at) // 86400)
+    spouse_name = spouse.get("username") or f"#{spouse_id}"
+    coin_b, xp_b = get_marriage_bonus(user)
+
+    await message.answer(
+        f"💍 <b>Семья</b>\n\n"
+        f"👤 Супруг(а): <b>{spouse_name}</b>\n"
+        f"📅 В браке: <b>{days}</b> дн.\n"
+        f"🎁 Текущий бонус: +{coin_b}% монет, +{xp_b}% опыта\n\n"
+        f"<i>Переводите монеты друг другу командой <code>перевод</code>!</i>"
+    )
 # =====================================================================
 # ДУЭЛИ
 # =====================================================================
@@ -4698,10 +5200,11 @@ async def duel_accept(callback: CallbackQuery):
         loser_id,  loser_name  = c_id, c_name
         winner_user, loser_user = target, challenger
 
-    new_winner_bal = winner_user["balance"] + bet
-    new_loser_bal  = max(0, loser_user["balance"] - bet)
+    bonus_win = apply_full_coin_bonus(winner_user, bet)
+    new_winner_bal = winner_user["balance"] + bonus_win
+    new_loser_bal = max(0, loser_user["balance"] - bet)
     update_user(winner_id, balance=new_winner_bal)
-    update_user(loser_id,  balance=new_loser_bal)
+    update_user(loser_id, balance=new_loser_bal)
     change_reputation(winner_id, +3)
     change_reputation(loser_id, -2)
     bump_stat(winner_id, "stat_duel_wins")
@@ -4709,17 +5212,17 @@ async def duel_accept(callback: CallbackQuery):
 
     del active_duels[chat_id]
 
-    # Проверяем ачивки победителя
     updated_winner = get_user(winner_id)
     check_and_grant_achievements(updated_winner)
     update_quest_progress(winner_id, "duel_win")
 
+    bonus_line = f" (🐾 бонус: +{bonus_win - bet})" if bonus_win > bet else ""
     await bot.send_message(chat_id,
-        f"🏆 <b>ПОБЕДИТЕЛЬ — {winner_name}!</b>\n\n"
-        f"⚔️ {c_power} vs {t_power}\n\n"
-        f"💰 {winner_name} получает <b>+{bet}</b> монет → {new_winner_bal}\n"
-        f"💸 {loser_name} теряет <b>-{bet}</b> монет → {new_loser_bal}"
-    )
+                           f"🏆 <b>ПОБЕДИТЕЛЬ — {winner_name}!</b>\n\n"
+                           f"⚔️ {c_power} vs {t_power}\n\n"
+                           f"💰 {winner_name} получает <b>+{bonus_win}</b> монет{bonus_line} → {new_winner_bal}\n"
+                           f"💸 {loser_name} теряет <b>-{bet}</b> монет → {new_loser_bal}"
+                           )
 
 
 @dp.callback_query(F.data.startswith("duel_decline:"))
@@ -4870,8 +5373,8 @@ def do_claim_daily(user: dict) -> tuple[bool, str]:
             streak = 0  # стрик сгорел
 
     streak = min(streak + 1, DAILY_STREAK_CAP)
-    coins = DAILY_BASE_COINS + streak * 20
-    exp   = DAILY_BASE_EXP   + streak * 5
+    coins = apply_full_coin_bonus(user, DAILY_BASE_COINS + streak * 20)
+    exp = apply_combined_xp_bonus(user, DAILY_BASE_EXP + streak * 5)
 
     new_balance = user["balance"] + coins
     new_exp     = user["exp"]     + exp
@@ -5087,6 +5590,95 @@ def apply_pet_bonus(user: dict, coins: int, xp: int) -> tuple[int, int]:
     new_xp    = int(xp    * (1 + xp_pct   / 100))
     return new_coins, new_xp
 
+def get_marriage_bonus(user: dict) -> tuple[int, int]:
+    """Возвращает (bonus_coins_pct, bonus_xp_pct) от брака.
+    Базовый бонус +5%/+5%, удваивается если супруг(а) тоже недавно работал(а)."""
+    spouse_id = user.get("spouse_id")
+    if not spouse_id:
+        return 0, 0
+    base_coin, base_xp = 5, 5
+    spouse = get_user(spouse_id)
+    if spouse and (int(time.time()) - spouse.get("last_work_time", 0)) < 3600:
+        return base_coin + 5, base_xp + 5
+    return base_coin, base_xp
+
+
+def get_equipped_item_bonus(user: dict) -> tuple[int, int, int]:
+    key = user.get("equipped_boss_item", "")
+    if not key or key not in BOSS_ITEMS:
+        return 0, 0, 0
+    item  = BOSS_ITEMS[key]
+    items = get_boss_items(user)
+    level = items.get(key, 1)
+    bonus = item["base_bonus"] + (level - 1) * max(1, item["base_bonus"] // 4)  # рост за апгрейд
+
+    if item["bonus_type"] == "coins":
+        return bonus, 0, 0
+    elif item["bonus_type"] == "xp":
+        return 0, bonus, 0
+    elif item["bonus_type"] == "luck":
+        return 0, 0, bonus
+    elif item["bonus_type"] == "both":
+        return bonus, bonus, 0
+    return 0, 0, 0
+
+
+def get_combined_bonus(user: dict) -> tuple[int, int, int]:
+    """Суммарный бонус: питомец + титул + брак + экипированный предмет с босса."""
+    pet_coins, pet_xp, pet_luck = get_pet_bonus(user)
+    title_coins, title_xp, title_luck = get_title_bonus(user)
+    marriage_coins, marriage_xp = get_marriage_bonus(user)
+    item_coins, item_xp, item_luck = get_equipped_item_bonus(user)
+    return (
+        pet_coins + title_coins + marriage_coins + item_coins,
+        pet_xp + title_xp + marriage_xp + item_xp,
+        pet_luck + title_luck + item_luck,
+    )
+
+
+def apply_full_coin_bonus(user: dict, amount: int) -> int:
+    coin_pct, _, _ = get_combined_bonus(user)
+    return int(amount * (1 + coin_pct / 100))
+
+
+def apply_combined_xp_bonus(user: dict, amount: int) -> int:
+    _, xp_pct, _ = get_combined_bonus(user)
+    return int(amount * (1 + xp_pct / 100))
+
+
+def apply_full_coin_bonus(user: dict, amount: int) -> int:
+    """Комбинированный бонус (питомец+титул+брак) ПЛЮС множитель активного ивента."""
+    amount = apply_full_coin_bonus(user, amount)
+    ev_coins_mult, _, _, _ = get_event_multipliers()
+    return int(amount * ev_coins_mult)
+
+
+def apply_full_xp_bonus(user: dict, amount: int) -> int:
+    amount = apply_combined_xp_bonus(user, amount)
+    _, ev_xp_mult, _, _ = get_event_multipliers()
+    return int(amount * ev_xp_mult)
+
+
+def grant_achievement_now(user_id: int, key: str) -> str | None:
+    """Немедленно выдаёт конкретное достижение (для событийных, не state-based, ачивок)."""
+    user = get_user(user_id)
+    if not user:
+        return None
+    owned = get_user_achievements(user)
+    if key in owned or key not in ACHIEVEMENTS:
+        return None
+    owned.add(key)
+    save_achievements(user_id, owned)
+    a = ACHIEVEMENTS[key]
+    new_balance = user["balance"] + a["reward_coins"]
+    new_exp     = user["exp"]     + a["reward_exp"]
+    update_user(user_id, balance=new_balance, exp=new_exp)
+    return (
+        f"🏅 <b>Новое достижение!</b> {a['name']}\n"
+        f"<i>{a['description']}</i>\n"
+        f"🎁 Награда: +{a['reward_coins']} монет, +{a['reward_exp']} XP"
+    )
+
 
 @dp.message(Command("gacha"))
 @dp.message(F.text.func(lambda t: t and t.strip().lower() in ("гача", "питомец", "gacha")))
@@ -5140,7 +5732,9 @@ async def callback_gacha_pull(callback: CallbackQuery):
     uid = callback.from_user.id
     user = get_user_safe(uid)
     is_premium = callback.data.split(":")[1] == "premium"
-    price = PET_GACHA_PREMIUM_PRICE if is_premium else PET_GACHA_PRICE
+    base_price = PET_GACHA_PREMIUM_PRICE if is_premium else PET_GACHA_PRICE
+    _, _, _, ev_discount = get_event_multipliers()
+    price = int(base_price * (1 - ev_discount / 100))
 
     if user["balance"] < price:
         await callback.answer(f"❌ Нужно {price} монет, есть {user['balance']}", show_alert=True)
@@ -5614,31 +6208,34 @@ async def dice_accept(callback: CallbackQuery):
 
     if c_sum > t_sum:
         winner_id, winner_name = c_id, c_name
-        loser_id,  loser_name  = t_id, t_name
+        loser_id, loser_name = t_id, t_name
         winner_bal = challenger["balance"]
-        loser_bal  = target["balance"]
+        loser_bal = target["balance"]
+        winner_user = challenger
     else:
         winner_id, winner_name = t_id, t_name
-        loser_id,  loser_name  = c_id, c_name
+        loser_id, loser_name = c_id, c_name
         winner_bal = target["balance"]
-        loser_bal  = challenger["balance"]
+        loser_bal = challenger["balance"]
+        winner_user = target
 
-    new_winner_bal = winner_bal + bet
-    new_loser_bal  = max(0, loser_bal - bet)
+    bonus_win = apply_full_coin_bonus(winner_user, bet)
+    new_winner_bal = winner_bal + bonus_win
+    new_loser_bal = max(0, loser_bal - bet)
     update_user(winner_id, balance=new_winner_bal)
-    update_user(loser_id,  balance=new_loser_bal)
+    update_user(loser_id, balance=new_loser_bal)
 
     change_reputation(winner_id, +2)
-    change_reputation(loser_id,  -1)
+    change_reputation(loser_id, -1)
     bump_stat(winner_id, "stat_dice_wins")
     bump_stat(loser_id, "stat_dice_losses")
 
+    bonus_line = f" (🐾 бонус: +{bonus_win - bet})" if bonus_win > bet else ""
     await bot.send_message(chat_id,
-        f"🏆 <b>ПОБЕДИТЕЛЬ — {winner_name}!</b>\n\n"
-        f"💰 +{bet} монет → баланс: {new_winner_bal}\n"
-        f"💸 -{bet} монет → баланс: {new_loser_bal}"
-    )
-
+                           f"🏆 <b>ПОБЕДИТЕЛЬ — {winner_name}!</b>\n\n"
+                           f"💰 +{bonus_win} монет{bonus_line} → баланс: {new_winner_bal}\n"
+                           f"💸 -{bet} монет → баланс: {new_loser_bal}"
+                           )
 
 @dp.callback_query(F.data.startswith("dice_decline:"))
 async def dice_decline(callback: CallbackQuery):
@@ -5722,8 +6319,13 @@ async def cmd_slots(message: Message):
         multiplier  = 0
         result_text = "😢 <b>Мимо! Ничего не совпало.</b>"
 
-    winnings    = bet * multiplier
-    profit      = winnings - bet
+    winnings = bet * multiplier
+    profit_raw = winnings - bet
+    if profit_raw > 0:
+        profit = apply_full_coin_bonus(user, profit_raw)
+        winnings = bet + profit
+    else:
+        profit = profit_raw
     new_balance = user["balance"] - bet + winnings
     update_user(uid, balance=new_balance)
     bump_stat(uid, "stat_slots_played")
@@ -6156,13 +6758,13 @@ def bj_status_text(game: dict, reveal_dealer: bool = False) -> str:
     )
 
 async def bj_finish(message_or_callback, game: dict, reason: str):
-    user_id = game["user_id"]
+    user_id   = game["user_id"]
+    user_data = get_user(user_id) or {}
     p_val   = bj_hand_value(game["player"])
     d_val   = bj_hand_value(game["dealer"])
     bet     = game["bet"]
     balance = game["balance"]
 
-    # Добиваем дилера до 17+
     while bj_hand_value(game["dealer"]) < 17:
         game["dealer"].append(game["deck"].pop())
     d_val = bj_hand_value(game["dealer"])
@@ -6171,9 +6773,9 @@ async def bj_finish(message_or_callback, game: dict, reason: str):
     d_bj = (len(game["dealer"]) == 2 and d_val == 21)
 
     if p_bj and not d_bj:
-        prize = int(bet * 1.5)
+        prize  = apply_full_coin_bonus(user_data, int(bet * 1.5))
         result = f"🃏 <b>БЛЕКДЖЕК!</b> +{prize} монет"
-        net = bet + prize  # возврат ставки + выигрыш 3:2
+        net = bet + prize
         change_reputation(user_id, +2)
     elif p_val > 21:
         prize = 0
@@ -6181,12 +6783,12 @@ async def bj_finish(message_or_callback, game: dict, reason: str):
         net = 0
         change_reputation(user_id, -1)
     elif d_val > 21:
-        prize = bet
+        prize  = apply_full_coin_bonus(user_data, bet)
         result = f"🎉 <b>Дилер перебрал ({d_val})!</b> +{prize} монет"
         net = bet + prize
         change_reputation(user_id, +1)
     elif p_val > d_val:
-        prize = bet
+        prize  = apply_full_coin_bonus(user_data, bet)
         result = f"🏆 <b>Победа! ({p_val} vs {d_val})</b> +{prize} монет"
         net = bet + prize
         change_reputation(user_id, +1)
@@ -6198,7 +6800,7 @@ async def bj_finish(message_or_callback, game: dict, reason: str):
     else:
         prize = 0
         result = f"🤝 <b>Ничья ({p_val})</b> — ставка возвращена"
-        net = bet  # только возврат ставки, без профита
+        net = bet
     new_balance = balance + net
     if net > bet or (p_bj and not d_bj) or d_val > 21 or p_val > d_val:
         bump_stat(user_id, "stat_blackjack_wins")
@@ -6333,6 +6935,289 @@ async def bj_double(callback: CallbackQuery):
     game["player"].append(game["deck"].pop())
     await callback.answer()
     await bj_finish(callback, game, "double")
+import json as _json_boss
+
+def get_boss_cooldowns(user: dict) -> dict:
+    raw = user.get("boss_cooldowns", "") or "{}"
+    try:
+        return _json_boss.loads(raw)
+    except Exception:
+        return {}
+
+def save_boss_cooldowns(user_id: int, cds: dict):
+    update_user(user_id, boss_cooldowns=_json_boss.dumps(cds))
+
+def get_boss_items(user: dict) -> dict:
+    raw = user.get("boss_items", "") or "{}"
+    try:
+        return _json_boss.loads(raw)
+    except Exception:
+        return {}
+
+def save_boss_items(user_id: int, items: dict):
+    update_user(user_id, boss_items=_json_boss.dumps(items))
+
+
+def check_boss_cooldown(user: dict, boss_key: str) -> tuple[bool, int]:
+    boss = BOSSES.get(boss_key)
+    if not boss:
+        return False, 0
+    cds = get_boss_cooldowns(user)
+    last = cds.get(boss_key, 0)
+    cooldown_sec = boss["cooldown_hours"] * 3600
+    now = int(time.time())
+    remaining = cooldown_sec - (now - last)
+    return remaining <= 0, max(0, remaining)
+
+
+def get_total_luck(user: dict) -> int:
+    _, _, combined_luck = get_combined_bonus(user)
+    return user.get("luck", 1) + combined_luck
+
+
+def roll_boss_item(user: dict) -> str | None:
+    """Возвращает ключ предмета или None. Шанс дропа и редкость зависят от удачи."""
+    luck = get_total_luck(user)
+    drop_chance = min(85, 20 + luck)  # % шанс получить хоть что-то
+    if random.randint(1, 100) > drop_chance:
+        return None
+
+    # Веса редкости, смещаемые удачей в сторону эпика/леги
+    weights = {
+        "common":    max(10, 55 - luck * 1.2),
+        "rare":      30 + luck * 0.6,
+        "epic":      12 + luck * 0.9,
+        "legendary": 2  + luck * 0.35,
+    }
+    rarities = list(weights.keys())
+    rarity = random.choices(rarities, weights=[weights[r] for r in rarities], k=1)[0]
+
+    pool = [k for k, v in BOSS_ITEMS.items() if v["rarity"] == rarity]
+    if not pool:
+        return None
+    item_weights = [BOSS_ITEMS[k]["weight"] for k in pool]
+    return random.choices(pool, weights=item_weights, k=1)[0]
+
+
+def calc_boss_power(user: dict) -> int:
+    base = (
+        user.get("agility", 1)   +
+        user.get("endurance", 1) +
+        user.get("charisma", 1)  +
+        user.get("intellect", 1)
+    )
+    luck_bonus = get_total_luck(user) * 2
+    roll = random.randint(1, 50)
+    return base + luck_bonus + roll
+
+
+def do_fight_boss(user: dict, boss_key: str) -> tuple[bool, str]:
+    boss = BOSSES.get(boss_key)
+    if not boss:
+        return False, "❌ Такого босса нет."
+    if user["level"] < boss["min_level"]:
+        return False, f"❌ Нужен уровень <b>{boss['min_level']}</b> (у тебя {user['level']})."
+
+    can, remaining = check_boss_cooldown(user, boss_key)
+    if not can:
+        h = remaining // 3600
+        m = (remaining % 3600) // 60
+        return False, f"⏳ <b>{boss['name']}</b> ещё не восстановился.\nПодожди: <b>{h}ч {m}мин</b>."
+
+    if user["energy"] < boss["energy_cost"]:
+        return False, (
+            f"😴 Недостаточно энергии!\n"
+            f"Нужно: <b>{boss['energy_cost']} ⚡</b>, есть: <b>{user['energy']} ⚡</b>."
+        )
+
+    # Тратим энергию и ставим кулдаун СРАЗУ — не даём фармить спамом попыток
+    new_energy = max(0, user["energy"] - boss["energy_cost"])
+    cds = get_boss_cooldowns(user)
+    cds[boss_key] = int(time.time())
+    update_user(user["user_id"], energy=new_energy)
+    save_boss_cooldowns(user["user_id"], cds)
+    user = {**user, "energy": new_energy}
+
+    user_power = calc_boss_power(user)
+    boss_power = boss["power_threshold"] + random.randint(0, int(boss["power_threshold"] * 0.3))
+    won = user_power > boss_power
+
+    if not won:
+        return True, (
+            f"⚔️ <b>{boss['name']}</b>\n\n"
+            f"💪 Твоя сила: <b>{user_power}</b> vs 👹 Сила босса: <b>{boss_power}</b>\n\n"
+            f"❌ <b>Поражение...</b>\n<i>{boss['lose_text']}</i>\n\n"
+            f"⚡ Энергия: <b>{new_energy}</b> (-{boss['energy_cost']})\n"
+            f"🔁 Следующая попытка через {boss['cooldown_hours']}ч."
+        )
+
+    shards = random.randint(boss["reward_shards_min"], boss["reward_shards_max"])
+    new_shards = user.get("shards", 0) + shards
+    update_user(user["user_id"], shards=new_shards)
+    bump_stat(user["user_id"], "stat_boss_kills")
+    change_reputation(user["user_id"], +2)
+
+    item_line = ""
+    dropped_key = roll_boss_item(user)
+    if dropped_key:
+        items = get_boss_items(user)
+        item = BOSS_ITEMS[dropped_key]
+        if dropped_key in items:
+            items[dropped_key] += 1
+            item_line = f"\n\n🎁 Дубликат: <b>{item['name']}</b> {item['rarity_label']}\nУровень предмета: <b>{items[dropped_key]}</b> (улучшен автоматически до макс. полученного уровня)"
+        else:
+            items[dropped_key] = 1
+            item_line = f"\n\n🎁 <b>НОВЫЙ ПРЕДМЕТ!</b>\n{item['name']} {item['rarity_label']}\n<i>{item['description']}</i>"
+            if not user.get("equipped_boss_item"):
+                update_user(user["user_id"], equipped_boss_item=dropped_key)
+                item_line += "\n🔧 Автоматически экипирован (первый предмет)."
+        save_boss_items(user["user_id"], items)
+
+    updated = get_user(user["user_id"])
+    ach_msgs = check_and_grant_achievements(updated) if updated else []
+    title_msgs = check_and_grant_titles(updated) if updated else []
+    extra = ("\n\n" + "\n".join(ach_msgs + title_msgs)) if (ach_msgs or title_msgs) else ""
+
+    return True, (
+        f"⚔️ <b>{boss['name']}</b>\n\n"
+        f"💪 Твоя сила: <b>{user_power}</b> vs 👹 Сила босса: <b>{boss_power}</b>\n\n"
+        f"🏆 <b>ПОБЕДА!</b>\n<i>{boss['win_text']}</i>\n\n"
+        f"🔶 Осколков получено: <b>+{shards}</b> (всего: {new_shards})\n"
+        f"⚡ Энергия: <b>{new_energy}</b> (-{boss['energy_cost']})\n"
+        f"🔁 Следующая попытка через {boss['cooldown_hours']}ч."
+        f"{item_line}{extra}"
+    )
+def do_upgrade_boss_item(user: dict, item_key: str) -> tuple[bool, str]:
+    item = BOSS_ITEMS.get(item_key)
+    if not item:
+        return False, "❌ Неизвестный предмет."
+    items = get_boss_items(user)
+    if item_key not in items:
+        return False, "❌ У тебя нет этого предмета."
+
+    level = items[item_key]
+    cost  = item["upgrade_cost_base"] * level
+    if user.get("shards", 0) < cost:
+        return False, f"❌ Нужно <b>{cost}</b> 🔶 осколков, есть <b>{user.get('shards', 0)}</b>."
+
+    items[item_key] += 1
+    save_boss_items(user["user_id"], items)
+    update_user(user["user_id"], shards=user.get("shards", 0) - cost)
+    return True, (
+        f"✅ <b>{item['name']}</b> улучшен до уровня <b>{items[item_key]}</b>!\n"
+        f"🔶 Потрачено: {cost} осколков."
+    )
+def build_bosses_text(user: dict) -> str:
+    lines = ["👹 <b>Боссы КТУ «Манас»</b>\n", f"🔶 Осколков: <b>{user.get('shards', 0)}</b>\n"]
+    for key, boss in BOSSES.items():
+        can, remaining = check_boss_cooldown(user, key)
+        if user["level"] < boss["min_level"]:
+            status = f"🔒 нужен {boss['min_level']} ур."
+        elif can:
+            status = "✅ доступен"
+        else:
+            h, m = remaining // 3600, (remaining % 3600) // 60
+            status = f"⏳ {h}ч {m}мин"
+        lines.append(
+            f"<b>{boss['name']}</b> — {status}\n"
+            f"  <i>{boss['description']}</i>\n"
+            f"  ⚡ {boss['energy_cost']} | 🔁 КД {boss['cooldown_hours']}ч | "
+            f"🔶 {boss['reward_shards_min']}-{boss['reward_shards_max']}"
+        )
+    return "\n\n".join(lines)
+
+
+def get_bosses_keyboard(user: dict) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for key, boss in BOSSES.items():
+        can, _ = check_boss_cooldown(user, key)
+        if user["level"] >= boss["min_level"] and can:
+            builder.button(text=f"⚔️ {boss['name']}", callback_data=f"boss_fight:{key}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+@dp.message(Command("bosses"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("боссы", "босс", "bosses")))
+async def cmd_bosses(message: Message):
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
+    await message.answer(build_bosses_text(user), reply_markup=get_bosses_keyboard(user))
+
+
+@dp.callback_query(F.data.startswith("boss_fight:"))
+async def callback_boss_fight(callback: CallbackQuery):
+    boss_key = callback.data.split(":")[1]
+    user = get_user_safe(callback.from_user.id)
+    await callback.answer()
+    _, text = do_fight_boss(user, boss_key)
+    await callback.message.answer(text)
+    updated = get_user(callback.from_user.id)
+    await callback.message.edit_text(build_bosses_text(updated), reply_markup=get_bosses_keyboard(updated))
+
+
+def build_inventory_text(user: dict) -> str:
+    items = get_boss_items(user)
+    equipped = user.get("equipped_boss_item", "")
+    lines = ["🎒 <b>Трофеи с боссов</b>\n", f"🔶 Осколков: <b>{user.get('shards', 0)}</b>\n"]
+    if not items:
+        lines.append("Пусто. Побеждай боссов, чтобы получить предметы!")
+    for key, level in items.items():
+        if key not in BOSS_ITEMS:
+            continue
+        item = BOSS_ITEMS[key]
+        mark = " ◀ экипирован" if key == equipped else ""
+        cost = item["upgrade_cost_base"] * level
+        lines.append(
+            f"{'✅' if key == equipped else '•'} <b>{item['name']}</b> {item['rarity_label']}{mark}\n"
+            f"  Уровень: {level} | Улучшение: {cost} 🔶"
+        )
+    return "\n\n".join(lines)
+
+
+def get_inventory_keyboard(user: dict) -> InlineKeyboardMarkup:
+    items = get_boss_items(user)
+    builder = InlineKeyboardBuilder()
+    for key in items:
+        if key not in BOSS_ITEMS:
+            continue
+        item = BOSS_ITEMS[key]
+        builder.button(text=f"🔧 Экипировать {item['name'][:20]}", callback_data=f"boss_equip:{key}")
+        builder.button(text=f"⬆️ Улучшить {item['name'][:20]}", callback_data=f"boss_upgrade:{key}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+@dp.message(Command("inventory"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("рюкзак", "трофеи", "инвентарь боссов")))
+async def cmd_boss_inventory(message: Message):
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
+    await message.answer(build_inventory_text(user), reply_markup=get_inventory_keyboard(user))
+
+
+@dp.callback_query(F.data.startswith("boss_equip:"))
+async def callback_boss_equip(callback: CallbackQuery):
+    key = callback.data.split(":")[1]
+    user = get_user_safe(callback.from_user.id)
+    items = get_boss_items(user)
+    if key not in items:
+        await callback.answer("У тебя нет этого предмета!", show_alert=True)
+        return
+    update_user(callback.from_user.id, equipped_boss_item=key)
+    await callback.answer(f"✅ Экипирован: {BOSS_ITEMS[key]['name']}!", show_alert=True)
+    updated = get_user(callback.from_user.id)
+    await callback.message.edit_text(build_inventory_text(updated), reply_markup=get_inventory_keyboard(updated))
+
+
+@dp.callback_query(F.data.startswith("boss_upgrade:"))
+async def callback_boss_upgrade(callback: CallbackQuery):
+    key = callback.data.split(":")[1]
+    user = get_user_safe(callback.from_user.id)
+    success, text = do_upgrade_boss_item(user, key)
+    await callback.answer()
+    await callback.message.answer(text)
+    if success:
+        updated = get_user(callback.from_user.id)
+        await callback.message.edit_text(build_inventory_text(updated), reply_markup=get_inventory_keyboard(updated))
 # =====================================================================
 # ТОЧКА ВХОДА
 # =====================================================================
