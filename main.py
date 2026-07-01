@@ -7218,6 +7218,15 @@ async def callback_boss_upgrade(callback: CallbackQuery):
     if success:
         updated = get_user(callback.from_user.id)
         await callback.message.edit_text(build_inventory_text(updated), reply_markup=get_inventory_keyboard(updated))
+
+@dp.message(Command("balance"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("баланс", "balance", "монеты")))
+async def cmd_balance(message: Message):
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
+    await message.answer(
+        f"💰 Монеты: <b>{user['balance']}</b>\n"
+        f"🔶 Осколки: <b>{user.get('shards', 0)}</b>"
+    )
 # =====================================================================
 # ТОЧКА ВХОДА
 # =====================================================================
