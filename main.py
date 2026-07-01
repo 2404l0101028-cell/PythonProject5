@@ -481,6 +481,7 @@ class ShopCallback(CallbackData, prefix="shop"):
 
 class TrainCallback(CallbackData, prefix="train"):
     stat: str
+    amount: int = 1
 
 class UpgradeJobCallback(CallbackData, prefix="upjob"):
     job_key: str
@@ -939,7 +940,7 @@ def do_buy_property(user: dict, prop_key: str) -> tuple[bool, str]:
         balance=new_balance,
         last_income_collect=last_collect or int(time.time()),
     )
-    change_reputation(user["user_id"], +2)
+    change_reputation(user["user_id"], +1)
 
     updated = get_user(user["user_id"])
     ach_msgs = check_and_grant_achievements(updated) if updated else []
@@ -2400,8 +2401,7 @@ def do_work(user: dict) -> tuple[bool, str]:
             change_reputation(user["user_id"], +1)
             luck_ach_msg = grant_achievement_now(user["user_id"], "luck_event")
         elif "⚠️" in event_line:
-            change_reputation(user["user_id"], -1)
-    change_reputation(user["user_id"], +1)  # за работу всегда +1
+            change_reputation(user["user_id"], -3)
     bump_stat(user["user_id"], "stat_work_count")
     event_block = f"\n\n{event_prefix}{event_line}" if event_line else ""
     if luck_ach_msg:
@@ -2499,53 +2499,72 @@ TRAIN_CONFIG = {
     "agility":   {"name": "🤸 Акробатика",            "stat_label": "🏃 Ловкость",     "active": True},
     "charisma":  {"name": "🎤 Публичное выступление", "stat_label": "✨ Харизма",       "active": True},
 }
+TRAIN_TIERS = {
+    1:  {"energy_cost": TRAIN_ENERGY_COST, "min_level": 1,  "label": "Обычная"},
+    5:  {"energy_cost": 260,               "min_level": 15, "label": "🔥 Усиленная"},
+    10: {"energy_cost": 550,               "min_level": 40, "label": "💥 Интенсивная"},
+}
 def get_stat_train_cap(user: dict) -> int:
     """Лимит стата, накачиваемого тренировкой: 10 на 1 lvl, 20 на 2 lvl и т.д."""
     return user["level"] * 10
 def build_training_text(user: dict) -> str:
     max_energy = get_max_energy(user)
     cap = get_stat_train_cap(user)
+    tiers_lines = []
+    for amount, tier in TRAIN_TIERS.items():
+        lock = "" if user["level"] >= tier["min_level"] else f" 🔒 (нужен {tier['min_level']} ур.)"
+        tiers_lines.append(f"  • {tier['label']}: +{amount} — {tier['energy_cost']} ⚡{lock}")
+
     return (
         f"🏋️ <b>Тренировки</b>\n\n"
         f"⚡ Энергия: <b>{user['energy']}</b> / {max_energy}\n\n"
-        f"Тренировки тратят <b>{TRAIN_ENERGY_COST} ⚡</b> и прокачивают характеристики.\n"
         f"📈 Лимит тренировки на твоём уровне: <b>{cap}</b> (растёт с уровнем: 10 на 1 lvl, 20 на 2 lvl...)\n"
         f"<i>⚡ Энергия восстанавливается только расходниками из Магазина!</i>\n\n"
-       f"🏃 Ловкость: -1 сек. кулдауна работы за каждые 5 ед. (сейчас: {get_work_cooldown(user)}с)\n"
+        f"<b>Виды тренировок:</b>\n" + "\n".join(tiers_lines) + "\n\n"
+        f"🏃 Ловкость: -1 сек. кулдауна работы за каждые 5 ед. (сейчас: {get_work_cooldown(user)}с)\n"
         f"✨ Харизма: скидка в 🛒 Магазине (сейчас: -{get_charisma_shop_discount(user)}%)"
     )
 
-def get_training_keyboard() -> InlineKeyboardMarkup:
+def get_training_keyboard(user: dict) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(
-        text=f"📖 Почитать книгу  (-{TRAIN_ENERGY_COST} ⚡) → +1 🧠 Интеллект",
-        callback_data=TrainCallback(stat="intellect").pack()
-    )
-    builder.button(
-        text=f"🏃 Пробежка  (-{TRAIN_ENERGY_COST} ⚡) → +1 💪 Выносливость",
-        callback_data=TrainCallback(stat="endurance").pack()
-    )
-    builder.button(
-        text=f"🤸 Акробатика  (-{TRAIN_ENERGY_COST} ⚡) → +1 🏃 Ловкость",
-        callback_data=TrainCallback(stat="agility").pack()
-    )
-    builder.button(
-        text=f"🎤 Выступление  (-{TRAIN_ENERGY_COST} ⚡) → +1 ✨ Харизма",
-        callback_data=TrainCallback(stat="charisma").pack()
-    )
+    stat_emojis = {
+        "intellect": ("📖 Почитать книгу", "🧠 Интеллект"),
+        "endurance": ("🏃 Пробежка", "💪 Выносливость"),
+        "agility":   ("🤸 Акробатика", "🏃 Ловкость"),
+        "charisma":  ("🎤 Публичное выступление", "✨ Харизма"),
+    }
+    for stat, (name, label) in stat_emojis.items():
+        for amount, tier in TRAIN_TIERS.items():
+            if user["level"] < tier["min_level"]:
+                continue
+            builder.button(
+                text=f"{name} {tier['label']} (-{tier['energy_cost']}⚡) → +{amount} {label}",
+                callback_data=TrainCallback(stat=stat, amount=amount).pack()
+            )
     builder.adjust(1)
     return builder.as_markup()
 
-def do_train(user: dict, stat: str) -> tuple[bool, str]:
+def do_train(user: dict, stat: str, amount: int = 1) -> tuple[bool, str]:
     cfg = TRAIN_CONFIG.get(stat)
     if not cfg:
         return False, "❌ Неизвестная тренировка."
     if not cfg["active"]:
         return False, f"🚧 <b>{cfg['name']}</b> пока в разработке. Скоро появится!"
-    if user["energy"] < TRAIN_ENERGY_COST:
+
+    tier = TRAIN_TIERS.get(amount)
+    if not tier:
+        return False, "❌ Неизвестный уровень тренировки."
+    if user["level"] < tier["min_level"]:
+        return False, (
+            f"❌ Для «{tier['label']}» нужен уровень <b>{tier['min_level']}</b> "
+            f"(у тебя {user['level']})."
+        )
+
+    energy_cost = tier["energy_cost"]
+    if user["energy"] < energy_cost:
         return False, (
             f"😴 Недостаточно энергии!\n"
-            f"Нужно: <b>{TRAIN_ENERGY_COST} ⚡</b>, есть: <b>{user['energy']} ⚡</b>.\n"
+            f"Нужно: <b>{energy_cost} ⚡</b>, есть: <b>{user['energy']} ⚡</b>.\n"
             f"Купи расходник в 🛒 Магазине."
         )
 
@@ -2558,16 +2577,24 @@ def do_train(user: dict, stat: str) -> tuple[bool, str]:
             f"Повысь уровень, чтобы качать дальше."
         )
 
-    new_energy = max(0, user["energy"] - TRAIN_ENERGY_COST)
-    new_stat   = current_val + 1
+    # Если до кап-лимита осталось меньше, чем даёт тир — урезаем прирост
+    # и пропорционально снижаем стоимость энергии, чтобы не переплачивать впустую
+    actual_amount = min(amount, cap - current_val)
+    actual_cost = max(1, round(energy_cost * actual_amount / amount))
+
+    new_energy = max(0, user["energy"] - actual_cost)
+    new_stat   = current_val + actual_amount
     update_user(user["user_id"], energy=new_energy, **{stat: new_stat})
     quest_msgs = update_quest_progress(user["user_id"], "train")
     updated    = {**user, stat: new_stat, "energy": new_energy}
     max_energy = get_max_energy(updated)
+
+    tier_note = "" if actual_amount == amount else f" (лимит уровня, дали только +{actual_amount})"
+
     return True, (
-        f"✅ <b>{cfg['name']}</b> завершена!\n\n"
-        f"{cfg['stat_label']}: <b>+1</b> → {new_stat} / {cap} (лимит уровня)\n"
-        f"⚡ Энергия: <b>{new_energy}</b> / {max_energy}  (-{TRAIN_ENERGY_COST})"
+        f"✅ <b>{cfg['name']}</b> ({tier['label']}) завершена!{tier_note}\n\n"
+        f"{cfg['stat_label']}: <b>+{actual_amount}</b> → {new_stat} / {cap} (лимит уровня)\n"
+        f"⚡ Энергия: <b>{new_energy}</b> / {max_energy}  (-{actual_cost})"
     )
 # =====================================================================
 # ЛОГИКА: МАГАЗИН
@@ -2855,7 +2882,7 @@ def do_stock_bet(user: dict, outcome_input: str, bet: int) -> tuple[bool, str]:
     else:
         new_balance = user["balance"] - bet
         update_user(user["user_id"], balance=new_balance)
-        change_reputation(user["user_id"], -1)
+        change_reputation(user["user_id"], -2)
         bump_stat(user["user_id"], "stat_stock_losses")
         phrase = random.choice(STOCK_LOSE_PHRASES)
         player_label = STOCK_LABELS[outcome_input]
@@ -3640,7 +3667,8 @@ HELP_CATEGORIES = {
             "<b>Тренировки</b> — прокачать Интеллект/Выносливость\n"
             "<b>Навыки</b> — Коммуникация, Вождение, Харизма и др.\n"
             "<b>Магазин</b> — снаряжение и еда\n"
-            "<b>Работа</b> — отработать смену (+монеты, +XP)\n\n"
+            "<b>Работа</b> — отработать смену (+монеты, +XP)\n"
+            "<b>покушать [название] [xN]</b> — быстро съесть предмет из магазина\n\n"
             "📊 Репутация влияет на скидки в магазине!\n"
             "🐾 Питомцы дают бонусы к монетам, XP и удаче."
         ),
@@ -3656,8 +3684,50 @@ HELP_CATEGORIES = {
             "<b>перевод @username 500</b> — перевести монеты\n"
             "<b>перевод 500</b> — перевод ответом на сообщение\n\n"
             "<b>репутация</b> — посмотреть репутацию и скидки\n"
-            "/top — топ-10 богачей\n"
-            "/my_place — твоё место в рейтинге"
+            "<b>баланс</b> — быстро посмотреть монеты и осколки"
+        ),
+    },
+    "property": {
+        "label": "🏠 Недвижимость и доход",
+        "text": (
+            "🏠 <b>Недвижимость и пассивный доход</b>\n\n"
+            "<b>недвижимость</b> или /properties — купить бизнес и собрать доход\n"
+            "  Каждый объект приносит монеты в час, копится макс. "
+            f"{PASSIVE_INCOME_CAP_HOURS}ч\n\n"
+            "🎁 <b>Ежедневный бонус</b>\n\n"
+            "<b>ежедневный</b> / <b>бонус</b> / /daily — забрать награду\n"
+            "  Растёт со стриком захода каждый день (сгорает при пропуске "
+            f"20ч)\n\n"
+            "🔗 <b>Рефералы</b>\n\n"
+            "<b>реферал</b> / <b>пригласить</b> / /ref — своя пригласительная ссылка\n"
+            f"  Тебе: +{REFERRAL_BONUS_COINS_REFERRER} монет, +{REFERRAL_BONUS_EXP_REFERRER} XP за друга\n"
+            f"  Другу: +{REFERRAL_BONUS_COINS_NEWBIE} монет, +{REFERRAL_BONUS_EXP_NEWBIE} XP"
+        ),
+    },
+    "bosses": {
+        "label": "👹 Боссы и трофеи",
+        "text": (
+            "👹 <b>Боссы</b>\n\n"
+            "<b>боссы</b> или /bosses — список боссов и их статус\n"
+            "  Побеждай, чтобы получить 🔶 осколки и предметы\n\n"
+            "🎒 <b>Трофеи</b>\n\n"
+            "<b>рюкзак</b> / <b>трофеи</b> или /inventory — твои предметы с боссов\n"
+            "  Экипируй один предмет — он даёт пассивный бонус к монетам/опыту/удаче\n"
+            "  Улучшай предметы за 🔶 осколки"
+        ),
+    },
+    "relationships": {
+        "label": "💞 Отношения и семья",
+        "text": (
+            "💞 <b>Отношения</b> (в группах)\n\n"
+            "<b>обнять @username</b> — поднять уровень отношений\n"
+            "<b>подарок @username</b> — подарить подарок за монеты\n"
+            "<b>отношения</b> — свой список отношений\n"
+            "<b>отношения @username</b> — отношения с конкретным человеком\n\n"
+            "💍 <b>Брак</b>\n\n"
+            "<b>брак @username</b> — сделать предложение\n"
+            "<b>развод</b> / /divorce — расторгнуть брак\n"
+            "<b>семья</b> / <b>супруг</b> / /family — инфо о браке и бонусах"
         ),
     },
     "games": {
@@ -3710,8 +3780,20 @@ HELP_CATEGORIES = {
             "<b>ивент</b> — посмотреть активный ивент"
         ),
     },
+    "rating": {
+        "label": "🏆 Рейтинги",
+        "text": (
+            "🏆 <b>Рейтинги</b>\n\n"
+            "/top — топ-10 богачей\n"
+            "/my_place — твоё место в рейтинге по балансу\n"
+            "<b>топ уровней</b> / /top_level — топ по уровню\n"
+            "<b>топ репутации</b> / /top_rep — топ по репутации\n"
+            "<b>топ рефералов</b> / /top_ref — топ по рефералам\n"
+            "<b>топ отношений</b> / /top_relationships — топ-10 пар по XP отношений\n"
+            "<b>список браков</b> / /marriages — все пары в браке"
+        ),
+    },
 }
-
 
 @dp.message(F.text.func(lambda t: _is(t, "команда", "команды", "помощь", "help")))
 async def txt_help_any(message: Message):
@@ -4796,7 +4878,7 @@ async def btn_work_private(message: Message):
 @dp.message(F.text == "🏋️ Тренировки", F.chat.type == "private")
 async def btn_training_private(message: Message):
     user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
-    await message.answer(build_training_text(user), reply_markup=get_training_keyboard())
+    await message.answer(build_training_text(user), reply_markup=get_training_keyboard(user))
 
 @dp.message(F.text == "🧠 Навыки", F.chat.type == "private")
 async def btn_skills_private(message: Message):
@@ -4904,7 +4986,7 @@ async def txt_train_group(message: Message):
     user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
     await message.answer(
         f"{message.from_user.mention_html()}\n{build_training_text(user)}",
-        reply_markup=get_training_keyboard()
+        reply_markup=get_training_keyboard(user)
     )
 
 @dp.message(F.chat.type.in_({"group", "supergroup"}),
@@ -5099,15 +5181,15 @@ async def callback_use_consumable(callback: CallbackQuery):
 
 @dp.callback_query(TrainCallback.filter())
 async def callback_train(callback: CallbackQuery, callback_data: TrainCallback):
-    user    = get_user_safe(callback.from_user.id)
-    success, text = do_train(user, callback_data.stat)
+    user = get_user_safe(callback.from_user.id)
+    success, text = do_train(user, callback_data.stat, callback_data.amount)
     await callback.answer()
     await callback.message.answer(text)
     if success:
         updated = get_user(callback.from_user.id)
         await callback.message.edit_text(
             build_training_text(updated),
-            reply_markup=get_training_keyboard()
+            reply_markup=get_training_keyboard(updated)
         )
 # =====================================================================
 # ТОП ИГРОКОВ
@@ -6336,8 +6418,8 @@ async def duel_accept(callback: CallbackQuery):
     new_loser_bal = max(0, loser_user["balance"] - bet)
     update_user(winner_id, balance=new_winner_bal)
     update_user(loser_id, balance=new_loser_bal)
-    change_reputation(winner_id, +3)
-    change_reputation(loser_id, -2)
+    change_reputation(winner_id, +2)
+    change_reputation(loser_id, -4)
     bump_stat(winner_id, "stat_duel_wins")
     bump_stat(loser_id, "stat_duel_losses")
 
@@ -7032,6 +7114,20 @@ def change_reputation(user_id: int, amount: int) -> tuple[int, int]:
     if not user:
         return 0, 0
     old_rep = user.get("reputation", 0)
+
+    if amount > 0:
+        # Чем ближе к 100 — тем меньше реальный прирост.
+        # У -100 репы прирост полный (x1.0), у +100 — почти нулевой (x0.15)
+        progress   = (old_rep - REP_MIN) / (REP_MAX - REP_MIN)  # 0..1
+        gain_mult  = max(0.15, 1 - progress)
+        amount     = max(1, round(amount * gain_mult))
+    else:
+        # Чем выше репутация — тем сильнее она проседает при проступке.
+        # На 100 репе потеря x2, на 0 и ниже — обычная.
+        loss_progress = max(0.0, old_rep) / REP_MAX if REP_MAX else 0
+        loss_mult     = 1 + loss_progress
+        amount        = -max(1, round(abs(amount) * loss_mult))
+
     new_rep = max(REP_MIN, min(REP_MAX, old_rep + amount))
     update_user(user_id, reputation=new_rep)
     return old_rep, new_rep
@@ -7070,13 +7166,15 @@ async def cmd_reputation(message: Message):
         f"[{bar}]\n"
         f"Очки: <b>{rep}</b> / {REP_MAX}\n\n"
         f"{discount_text}\n\n"
-        f"━━━ Как растёт репутация ━━━\n"
-        f"✅ Работа: +1\n"
-        f"✅ Победа в дуэли: +3\n"
-        f"✅ Выполнение квеста: +2\n"
-        f"❌ Поражение в дуэли: -2\n"
-        f"❌ Проигрыш на бирже: -1\n"
-        f"❌ Негативное событие на работе: -1"
+       f"━━━ Как меняется репутация ━━━\n"
+        f"✅ Позитивное событие на работе: +1\n"
+        f"✅ Победа в дуэли: +2 | в кости: +1\n"
+        f"✅ Победа на бирже/боссе/квесте: +1\n"
+        f"❌ Негативное событие на работе: -3\n"
+        f"❌ Поражение в дуэли: -4 | в кости: -3\n"
+        f"❌ Проигрыш на бирже/в казино: -2\n\n"
+        f"<i>⚠️ Чем ближе к 100 — тем слабее прирост.\n"
+        f"⚠️ Чем выше репутация — тем больнее падение при неудаче.</i>"
     )
 @dp.message(Command("titles"))
 @dp.message(F.text.func(lambda t: t and t.strip().lower() in ("титулы", "титул")))
@@ -7350,8 +7448,8 @@ async def dice_accept(callback: CallbackQuery):
     update_user(winner_id, balance=new_winner_bal)
     update_user(loser_id, balance=new_loser_bal)
 
-    change_reputation(winner_id, +2)
-    change_reputation(loser_id, -1)
+    change_reputation(winner_id, +1)
+    change_reputation(loser_id, -2)
     bump_stat(winner_id, "stat_dice_wins")
     bump_stat(loser_id, "stat_dice_losses")
 
