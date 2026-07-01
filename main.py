@@ -1729,6 +1729,29 @@ async def cmd_marriage_list(message: Message):
 
     await message.answer("\n".join(lines))
 
+def _is_top1(field: str, user_id: int) -> bool:
+    """field должен быть жёстко заданной колонкой — не пользовательский ввод."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT user_id FROM users ORDER BY {field} DESC LIMIT 1")
+            row = cur.fetchone()
+    return bool(row and row[0] == user_id)
+
+def _count_relationships_above(user_id: int, min_xp: int) -> int:
+    """Считает, с каким количеством разных людей у user_id отношения >= min_xp."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*)
+                FROM relationships
+                WHERE (user1_id = %s OR user2_id = %s)
+                  AND xp >= %s
+                """,
+                (user_id, user_id, min_xp)
+            )
+            row = cur.fetchone()
+    return row[0] if row else 0
 # =====================================================================
 # ТИТУЛЫ
 # =====================================================================
@@ -1807,6 +1830,57 @@ TITLES = {
         "bonus_coins": 8, "bonus_xp": 8, "bonus_luck": 5,
         "description": "Победи всех боссов КТУ.",
         "condition": lambda u: all(k in get_boss_cooldowns(u) for k in BOSSES),
+    },
+# ── Донатерские (только вручную от админа) ──
+    "top_donator": {
+        "name": "💎 Главный Дотер", "admin_only": True,
+        "bonus_coins": 25, "bonus_xp": 25, "bonus_luck": 25,
+        "description": "Высшая награда для главного донатера проекта. Выдаётся только администрацией.",
+        "condition": None,
+    },
+    "donator": {
+        "name": "🎗 Дотер", "admin_only": True,
+        "bonus_coins": 12, "bonus_xp": 12, "bonus_luck": 12,
+        "description": "Награда для донатера проекта. Выдаётся только администрацией.",
+        "condition": None,
+    },
+
+    # ── За 1 место в лидербордах (проверяются автоматически) ──
+    "king_of_coins": {
+        "name": "💰 Король монет", "admin_only": False,
+        "bonus_coins": 8, "bonus_xp": 0, "bonus_luck": 0,
+        "description": "Займи 1 место в топе по балансу.",
+        "condition": lambda u: _is_top1("balance", u["user_id"]),
+    },
+    "king_of_levels": {
+        "name": "⭐ Король уровней", "admin_only": False,
+        "bonus_coins": 0, "bonus_xp": 8, "bonus_luck": 0,
+        "description": "Займи 1 место в топе по уровню.",
+        "condition": lambda u: _is_top1("level", u["user_id"]),
+    },
+    "king_of_reputation": {
+        "name": "🌟 Король репутации", "admin_only": False,
+        "bonus_coins": 0, "bonus_xp": 0, "bonus_luck": 8,
+        "description": "Займи 1 место в топе по репутации.",
+        "condition": lambda u: _is_top1("reputation", u["user_id"]),
+    },
+    "king_of_referrals": {
+        "name": "🔗 Король рефералов", "admin_only": False,
+        "bonus_coins": 5, "bonus_xp": 5, "bonus_luck": 0,
+        "description": "Займи 1 место в топе по рефералам.",
+        "condition": lambda u: _is_top1("referral_count", u["user_id"]),
+    },
+    "auctioneer": {
+        "name": "📊 Аукционер", "admin_only": False,
+        "bonus_coins": 6, "bonus_xp": 0, "bonus_luck": 4,
+        "description": "Выиграй 25 раз на бирже.",
+        "condition": lambda u: u.get("stat_stock_wins", 0) >= 25,
+    },
+    "playboy": {
+        "name": "😎 Бабник", "admin_only": False,
+        "bonus_coins": 5, "bonus_xp": 5, "bonus_luck": 5,
+        "description": "Прокачай отношения до 3000 XP («Неразлучники») сразу с 2+ людьми.",
+        "condition": lambda u: _count_relationships_above(u["user_id"], 3000) >= 2,
     },
 }
 
@@ -2947,7 +3021,8 @@ def do_stock_bet(user: dict, outcome_input: str, bet: int) -> tuple[bool, str]:
     won           = (outcome_input == market_result)
 
     if won:
-        profit = apply_full_coin_bonus(user, bet)
+        mult = STOCK_PAYOUT_MULT.get(outcome_input, 1)
+        profit = apply_full_coin_bonus(user, bet * mult)
         new_balance = user["balance"] + profit
         update_user(user["user_id"], balance=new_balance)
         change_reputation(user["user_id"], +1)
@@ -2958,11 +3033,12 @@ def do_stock_bet(user: dict, outcome_input: str, bet: int) -> tuple[bool, str]:
         if updated:
             check_and_grant_achievements(updated)
         phrase = random.choice(STOCK_WIN_PHRASES)
+        mult_line = f"\n🎲 Множитель: <b>x{mult}</b>" if mult > 1 else ""
         text = (
             f"📊 <b>Рынок пришёл в движение!</b>\n"
             f"График пошёл: <b>{market_label}</b>\n\n"
             f"🎉 <b>Вы угадали тренд!</b>\n"
-            f"{phrase}\n\n"
+            f"{phrase}{mult_line}\n\n"
             f"💰 Выигрыш: <b>+{profit}</b> монет\n"
             f"📈 Баланс: <b>{new_balance}</b> монет"
         )
