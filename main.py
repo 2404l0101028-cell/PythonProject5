@@ -4780,11 +4780,32 @@ async def cmd_remove_title(message: Message):
 
     await message.answer(f"✅ Титул <code>{title_key}</code> снят с пользователя <code>{target_id}</code>")
 
-@dp.message(Command("eat"))
-@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("покушать", "кушать", "поесть", "eat")))
-async def cmd_eat_menu(message: Message):
+@dp.message(F.text.func(lambda t: t and t.strip().lower().startswith(("покушать ", "съесть ", "eat "))))
+async def cmd_eat_text(message: Message):
+    parts = message.text.strip().split()
+    if len(parts) < 2:
+        return  # просто "покушать" — уже обработано другим хендлером
+
+    qty_str = parts[-1].lower().lstrip("x")
+    quantity = int(qty_str) if qty_str.isdigit() else 1
+    item_query = " ".join(parts[1:-1]) if qty_str.isdigit() else " ".join(parts[1:])
+    item_query = item_query.lower().strip()
+
+    # ищем предмет по названию (без эмодзи, без учёта регистра)
+    item_key = None
+    for key, item in CONSUMABLES.items():
+        clean_name = item["name"].split(" ", 1)[-1].lower()  # убираем эмодзи
+        if item_query in clean_name or item_query == key:
+            item_key = key
+            break
+
+    if not item_key:
+        await message.answer(f"❌ Не найден предмет «{item_query}». Посмотри список: <code>покушать</code>")
+        return
+
     user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
-    await message.answer(build_food_category_text(user), reply_markup=get_shop_food_keyboard())
+    success, text = do_use_consumable(user, item_key, quantity)
+    await message.answer(text)
 
 @dp.message(F.text.func(lambda t: t and t.strip().lower() in ("перс", "персонаж")), F.chat.type == "private")
 async def txt_profile_alias_private(message: Message):
