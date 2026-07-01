@@ -2635,11 +2635,12 @@ def do_work(user: dict) -> tuple[bool, str]:
         remaining = cooldown - elapsed
         return False, f"⏳ Подожди ещё <b>{remaining}</b> сек. (кулдаун {cooldown}с — 🏃 Ловкость сокращает)"
 
-    if user["energy"] < WORK_ENERGY_COST:
+    energy_cost = apply_energy_discount(WORK_ENERGY_COST)
+    if user["energy"] < energy_cost:
         max_e = get_max_energy(user)
         return False, (
             f"😴 Недостаточно энергии!\n"
-            f"Нужно: <b>{WORK_ENERGY_COST} ⚡</b>, есть: <b>{user['energy']} ⚡</b> / {max_e}.\n"
+            f"Нужно: <b>{energy_cost} ⚡</b>, есть: <b>{user['energy']} ⚡</b> / {max_e}.\n"
             f"Купи расходники в 🛒 Магазине."
         )
     job = get_job(user)
@@ -2700,7 +2701,7 @@ def do_work(user: dict) -> tuple[bool, str]:
 
     new_balance = user["balance"] + earned_coins
     new_exp     = user["exp"]     + earned_exp
-    new_energy  = max(0, user["energy"] - WORK_ENERGY_COST)
+    new_energy  = max(0, user["energy"] - energy_cost)
 
     update_user(
         user["user_id"],
@@ -2738,7 +2739,7 @@ def do_work(user: dict) -> tuple[bool, str]:
         f"{event_block}\n\n"
         f"💰 Получено: <b>+{earned_coins}</b> монет\n"
         f"✨ Опыт: <b>+{earned_exp}</b>  (всего: {user['exp']} / {xp_needed(user['level'])})\n"
-        f"⚡ Энергия: <b>{new_energy}</b> / {max_energy}  (-{WORK_ENERGY_COST})\n"
+        f"⚡ Энергия: <b>{new_energy}</b> / {max_energy}  (-{energy_cost})\n"
         f"📊 Итого монет: <b>{user['balance']}</b>"
         f"{level_block}"
         f"{ach_block}"
@@ -5748,10 +5749,207 @@ async def cmd_give_exp(message: Message):
         + (f"\n{level_block}" if level_block else "")
     )
 
+@dp.message(Command("give_resource"))
+async def cmd_give_resource(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+    parts = message.text.strip().split()
+    target_id = None
+    res_key = None
+    amount = None
 
-dp.message(Command("give_item"))
+    if message.reply_to_message and message.reply_to_message.from_user:
+        target_id = message.reply_to_message.from_user.id
+        if len(parts) >= 3 and parts[2].isdigit():
+            res_key = parts[1]
+            amount = int(parts[2])
+    else:
+        if len(parts) >= 4 and parts[1].isdigit() and parts[3].isdigit():
+            target_id = int(parts[1])
+            res_key = parts[2]
+            amount = int(parts[3])
 
+    if not target_id or not res_key or res_key not in RESOURCES or not amount or amount <= 0:
+        keys = "\n".join(f"  <code>{k}</code> — {v['name']}" for k, v in RESOURCES.items())
+        await message.answer(
+            "❌ Формат:\n"
+            "<code>/give_resource 12345678 iron_ore 10</code>\n"
+            "или ответом: <code>/give_resource iron_ore 10</code>\n\n"
+            f"Доступные ресурсы:\n{keys}"
+        )
+        return
 
+    register_user(target_id)
+    user = get_user(target_id)
+    resources = get_resources(user)
+    resources[res_key] = resources.get(res_key, 0) + amount
+    save_resources(target_id, resources)
+    await message.answer(
+        f"✅ Выдано {RESOURCES[res_key]['name']} x<b>{amount}</b> пользователю <code>{target_id}</code>"
+    )
+
+@dp.message(Command("give_tool"))
+async def cmd_give_tool(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+    parts = message.text.strip().split()
+    target_id, key = _resolve_id_and_arg(message, parts)
+    if not target_id or not key or key not in TOOLS:
+        keys = "\n".join(f"  <code>{k}</code> — {v['name']}" for k, v in TOOLS.items())
+        await message.answer(
+            "❌ Формат:\n<code>/give_tool 12345678 pickaxe_iron</code>\n"
+            "или ответом: <code>/give_tool pickaxe_iron</code>\n\n"
+            f"Доступные инструменты:\n{keys}"
+        )
+        return
+    register_user(target_id)
+    user = get_user(target_id)
+    tools_owned = get_tools(user)
+    tools_owned[key] = 1
+    save_tools(target_id, tools_owned)
+    ttype = TOOLS[key]["type"]
+    equip_field = f"equipped_tool_{ttype}"
+    if not user.get(equip_field):
+        update_user(target_id, **{equip_field: key})
+    await message.answer(f"✅ Инструмент <b>{TOOLS[key]['name']}</b> выдан пользователю <code>{target_id}</code>")
+
+@dp.message(Command("give_location_item"))
+async def cmd_give_location_item(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+    parts = message.text.strip().split()
+    target_id, key = _resolve_id_and_arg(message, parts)
+    if not target_id or not key or key not in LOCATION_BOSS_ITEMS:
+        keys = "\n".join(f"  <code>{k}</code> — {v['name']}" for k, v in LOCATION_BOSS_ITEMS.items())
+        await message.answer(
+            "❌ Формат:\n<code>/give_location_item 12345678 golem_core</code>\n"
+            "или ответом: <code>/give_location_item golem_core</code>\n\n"
+            f"Доступные трофеи:\n{keys}"
+        )
+        return
+    register_user(target_id)
+    user = get_user(target_id)
+    items = get_location_items(user)
+    if key in items:
+        items[key] += 1
+    else:
+        items[key] = 1
+        if not user.get("equipped_location_item"):
+            update_user(target_id, equipped_location_item=key)
+    save_location_items(target_id, items)
+    await message.answer(f"✅ Трофей <b>{LOCATION_BOSS_ITEMS[key]['name']}</b> выдан пользователю <code>{target_id}</code>")
+
+@dp.message(Command("set_reputation"))
+async def cmd_set_reputation(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+    parts = message.text.strip().split()
+    target_id, val_str = _resolve_id_and_arg(message, parts)
+    if not target_id or not val_str or not val_str.lstrip("-").isdigit():
+        await message.answer(
+            "❌ Формат: <code>/set_reputation 12345678 50</code> "
+            "или ответом: <code>/set_reputation 50</code>"
+        )
+        return
+    value = max(REP_MIN, min(REP_MAX, int(val_str)))
+    register_user(target_id)
+    update_user(target_id, reputation=value)
+    title, _ = get_rep_title(value)
+    await message.answer(
+        f"✅ Репутация пользователя <code>{target_id}</code> установлена: <b>{value}</b> ({title})"
+    )
+
+@dp.message(Command("reset_all_cooldowns"))
+async def cmd_reset_all_cooldowns(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+    parts = message.text.strip().split()
+    target_id = _resolve_id_only(message, parts)
+    if not target_id:
+        await message.answer(
+            "❌ Формат: <code>/reset_all_cooldowns 12345678</code> "
+            "или ответом на сообщение игрока"
+        )
+        return
+    register_user(target_id)
+    update_user(
+        target_id,
+        last_work_time=0,
+        last_hunt_time=0,
+        last_fish_time=0,
+        last_mine_time=0,
+        boss_cooldowns="{}",
+        location_boss_cooldowns="{}",
+    )
+    await message.answer(
+        f"✅ Все кулдауны сброшены для <code>{target_id}</code> "
+        f"(работа, добыча, боссы, боссы локаций)"
+    )
+
+@dp.message(Command("server_stats"))
+async def cmd_server_stats(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*), COALESCE(SUM(balance),0), "
+                "COALESCE(AVG(level),0), COALESCE(MAX(level),0) FROM users"
+            )
+            total_users, total_balance, avg_level, max_level = cur.fetchone()
+            cur.execute("SELECT COUNT(*) FROM users WHERE is_banned = 1")
+            banned = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM users WHERE spouse_id IS NOT NULL")
+            married = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM relationships")
+            relationships_count = cur.fetchone()[0]
+
+    await message.answer(
+        f"📊 <b>Статистика сервера</b>\n\n"
+        f"👥 Всего игроков: <b>{total_users}</b>\n"
+        f"🚫 Забанено: <b>{banned}</b>\n"
+        f"💍 В браке: <b>{married // 2}</b> пар\n"
+        f"💞 Связей (отношения): <b>{relationships_count}</b>\n\n"
+        f"💰 Монет в экономике: <b>{total_balance}</b>\n"
+        f"⭐ Средний уровень: <b>{avg_level:.1f}</b>\n"
+        f"🏆 Макс. уровень: <b>{max_level}</b>\n\n"
+        f"👥 Групп с ботом: <b>{len(registered_chats)}</b>"
+    )
+
+@dp.message(Command("give_all"))
+async def cmd_give_all(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+    parts = message.text.strip().split()
+    if len(parts) != 3 or parts[1].lower() not in ("coins", "exp") or not parts[2].lstrip("-").isdigit():
+        await message.answer(
+            "❌ Формат:\n"
+            "<code>/give_all coins 100</code> — начислить всем монеты\n"
+            "<code>/give_all exp 50</code> — начислить всем опыт"
+        )
+        return
+
+    field = "balance" if parts[1].lower() == "coins" else "exp"
+    amount = int(parts[2])
+
+    status_msg = await message.answer("⏳ Начисляю всем игрокам...")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"UPDATE users SET {field} = {field} + %s", (amount,))
+            count = cur.rowcount
+            conn.commit()
+
+    label = "монет" if field == "balance" else "опыта"
+    await status_msg.edit_text(f"✅ Начислено <b>{amount}</b> {label} всем игрокам (<b>{count}</b> чел.)")
+
+@dp.message(Command("give_item"))
 async def cmd_give_item(message: Message):
     if message.from_user.id != ADMIN_ID:
         await message.answer("⛔ Нет доступа.")
@@ -5984,7 +6182,7 @@ async def cmd_reset_cooldown(message: Message):
     await message.answer(f"✅ Кулдаун работы сброшен для <code>{target_id}</code>")
 
 
-dp.message(Command("ban"))
+@dp.message(Command("ban"))
 
 
 async def cmd_ban_user(message: Message):
@@ -6077,6 +6275,7 @@ ADMIN_HELP_CATEGORIES = {
             "<code>/set_hp [id] значение</code> — установить HP\n"
             "<code>/reset_cooldown [id]</code> — сбросить кулдаун работы\n"
             "<code>/reset_daily [id]</code> — сбросить ежедневный бонус"
+            "<code>/reset_all_cooldowns [id]</code> — сбросить кулдаун всего\n"
         ),
     },
     "items": {
@@ -6087,6 +6286,9 @@ ADMIN_HELP_CATEGORIES = {
             "<code>/give_pet [id] ключ</code> — выдать питомца\n"
             "<code>/give_boss_item [id] ключ</code> — выдать трофей с босса\n"
             "<code>/give_property [id] ключ</code> — выдать недвижимость"
+            "<code>/give_resource [id] ключ</code> — выдать ресурс"
+            "<code>/give_tool [id] ключ</code> — выдать инструмент"
+            "<code>/give_location_item [id] ключ</code> — выдать локальный предмет"
         ),
     },
     "progression": {
@@ -6094,6 +6296,7 @@ ADMIN_HELP_CATEGORIES = {
         "text": (
             "🏆 <b>Профессии, титулы, достижения</b>\n\n"
             "<code>/set_job [id] job_key</code> — установить профессию\n"
+            "<code>/set_reputation [id] ключь</code> — установить репутацию\n"
             "<code>/give_title [id] ключ</code> — выдать титул\n"
             "<code>/remove_title [id] ключ</code> — снять титул\n"
             "<code>/give_achievement [id] ключ</code> — выдать достижение"
@@ -6120,6 +6323,8 @@ ADMIN_HELP_CATEGORIES = {
             "<code>объявление текст</code> — рассылка текста всем\n"
             "<code>объявление</code> (ответом на сообщение) — рассылка копии "
             "(фото/видео/текст)"
+            "<code>/server_stats -статистика сервера\n"
+            "<code>/give_all - дать всем деньги, опыт\n"
         ),
     },
 }
@@ -9412,7 +9617,7 @@ def do_gather(user: dict, node_key: str) -> tuple[bool, str]:
 
     gained = {}
     for _ in range(amount):
-        res_key = roll_resource(node["loc"], total_luck)
+        res_key = roll_resource(node_key, total_luck)
         gained[res_key] = gained.get(res_key, 0) + 1
 
     resources = get_resources(user)
@@ -9711,7 +9916,7 @@ def do_fight_location_boss(user: dict, boss_key: str) -> tuple[bool, str]:
     resources = get_resources(user)
     gained = {}
     for _ in range(amount):
-        rk = roll_resource(node["loc"], 10)
+        rk = roll_resource(boss["loc"], 10)
         gained[rk] = gained.get(rk, 0) + 1
         resources[rk] = resources.get(rk, 0) + 1
     save_resources(user["user_id"], resources)
