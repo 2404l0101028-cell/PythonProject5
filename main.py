@@ -1956,8 +1956,8 @@ def do_upgrade_skill(user: dict, skill_key: str) -> tuple[bool, str]:
 TRAIN_CONFIG = {
     "intellect": {"name": "📖 Почитать книгу",        "stat_label": "🧠 Интеллект",   "active": True},
     "endurance": {"name": "🏃 Пробежка",              "stat_label": "💪 Выносливость", "active": True},
-    "agility":   {"name": "🤸 Акробатика",            "stat_label": "🏃 Ловкость",     "active": False},
-    "charisma":  {"name": "🎤 Публичное выступление", "stat_label": "✨ Харизма",       "active": False},
+    "agility":   {"name": "🤸 Акробатика",            "stat_label": "🏃 Ловкость",     "active": True},
+    "charisma":  {"name": "🎤 Публичное выступление", "stat_label": "✨ Харизма",       "active": True},
 }
 def get_stat_train_cap(user: dict) -> int:
     """Лимит стата, накачиваемого тренировкой: 10 на 1 lvl, 20 на 2 lvl и т.д."""
