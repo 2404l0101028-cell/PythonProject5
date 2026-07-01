@@ -669,6 +669,17 @@ CONSUMABLES = {
 }
 
 BOSSES = {
+    "shaurma_ghost": {
+        "name": "🌯 Дух прокисшей шаурмы из Джала",
+        "min_level": 3,
+        "cooldown_hours": 2,
+        "energy_cost": 20,
+        "power_threshold": 25,
+        "reward_shards_min": 10, "reward_shards_max": 20,
+        "description": "Легендарная шаурма 2019 года так и не была доедена. Теперь её дух бродит по коридорам, ищет второго едока.",
+        "win_text": "Ты выдержал запах и не поморщился. Дух шаурмы уважительно растворился в паре специй.",
+        "lose_text": "Тебя стошнило прямо у входа в столовую. Позорное отступление под смех однокурсников.",
+    },
     "dorm_ghost": {
         "name": "🏚 Дух общаги на Джале",
         "min_level": 5,
@@ -691,6 +702,17 @@ BOSSES = {
         "win_text": "Ты вырвал ведомость и сжёг её у фонтана. Призрак развеялся с воплем 'ну ладно, зачёт автоматом!'",
         "lose_text": "Призрак вписал тебя в список на отчисление. К счастью, понарошку. Пока что.",
     },
+    "biblioteka_silence": {
+        "name": "📚 Библиотечный Молчун",
+        "min_level": 22,
+        "cooldown_hours": 10,
+        "energy_cost": 32,
+        "power_threshold": 160,
+        "reward_shards_min": 40, "reward_shards_max": 70,
+        "description": "Существо из читального зала. Шипит «тс-с-с» громче любого шума и штрафует за скрип стула.",
+        "win_text": "Ты сдал книгу без единого шороха. Молчун одобрительно кивнул и исчез между стеллажами.",
+        "lose_text": "Ты чихнул в самый неподходящий момент. Молчун выгнал тебя из читального зала на неделю.",
+    },
     "somsynav_proctor": {
         "name": "🕴 Проктор Сом-сынава",
         "min_level": 30,
@@ -701,6 +723,17 @@ BOSSES = {
         "description": "Легендарный надзиратель экзаменов, видящий шпаргалки сквозь стены. Ходят слухи, что он не моргает уже 12 лет.",
         "win_text": "Ты выдержал его взгляд, не моргнув. Проктор молча кивнул и исчез в облаке мела.",
         "lose_text": "Проктор заметил твою шпаргалку раньше, чем ты её достал. Позорное изгнание из аудитории.",
+    },
+    "stipendiya_demon": {
+        "name": "💸 Демон невыплаченной стипендии",
+        "min_level": 40,
+        "cooldown_hours": 16,
+        "energy_cost": 37,
+        "power_threshold": 330,
+        "reward_shards_min": 140, "reward_shards_max": 220,
+        "description": "Обитает в бухгалтерии. Держит стипендии всего курса заложниками уже третий месяц подряд под предлогом «завтра будет».",
+        "win_text": "Ты добыл справку с тремя подписями и печатью. Демон нехотя подписал перевод — стипендия пошла!",
+        "lose_text": "Демон отправил тебя за четвёртой подписью в другой корпус. Круг бюрократии замкнулся.",
     },
     "minobr_commission": {
         "name": "🏛 Комиссия Минобра",
@@ -713,6 +746,17 @@ BOSSES = {
         "win_text": "Комиссия не нашла нарушений. Более того — один из них тайком спросил, где тут столовая с чорбо.",
         "lose_text": "Комиссия составила акт на 40 страниц. Читать его придётся весь семестр.",
     },
+    "rektorat_dracon": {
+        "name": "🐲 Дракон приёмной ректора",
+        "min_level": 65,
+        "cooldown_hours": 30,
+        "energy_cost": 45,
+        "power_threshold": 580,
+        "reward_shards_min": 260, "reward_shards_max": 400,
+        "description": "Охраняет вход в кабинет ректора. Дышит не огнём, а бюрократическими отписками — обжигает не хуже пламени.",
+        "win_text": "Ты прошёл мимо дракона с папкой из 12 согласований. Он молча посторонился — редчайшая честь.",
+        "lose_text": "Дракон завернул тебя обратно с формулировкой «зайдите после обеда». Обед так и не наступил.",
+    },
     "manas_spirit": {
         "name": "🐎 Дух великого эпоса Манас",
         "min_level": 80,
@@ -724,8 +768,18 @@ BOSSES = {
         "win_text": "Дух Манаса склонил голову. 'Ты достоин носить имя батыра университета.' Осколки эпоса теперь твои.",
         "lose_text": "Дух эпоса лишь усмехнулся твоей самонадеянности. Возвращайся, когда станешь сильнее.",
     },
+    "gak_commission": {
+        "name": "👁 Тайная комиссия ГАК",
+        "min_level": 100,
+        "cooldown_hours": 60,
+        "energy_cost": 55,
+        "power_threshold": 950,
+        "reward_shards_min": 380, "reward_shards_max": 550,
+        "description": "Секретная государственная аттестационная комиссия, о которой ходят только легенды. Видит насквозь любую дипломную работу и любую судьбу.",
+        "win_text": "Комиссия встала и молча зааплодировала. Такого защиты диплома здесь не видели никогда.",
+        "lose_text": "Председатель комиссии произнёс лишь одно слово: 'Пересдача'. Зал погрузился в тишину.",
+    },
 }
-
 BOSS_ITEMS = {
     # ── Обычные ──
     "old_conspectus": {
@@ -778,6 +832,42 @@ BOSS_ITEMS = {
         "bonus_type": "both", "base_bonus": 22,
         "description": "Символ абсолютной власти в стенах КТУ. Все двери открыты.",
         "weight": 1, "upgrade_cost_base": 1500,
+    },
+# ── Эксклюзивные трофеи новых боссов ──
+    "shaurma_amulet": {
+        "name": "🥙 Амулет прокисшей шаурмы", "rarity": "rare", "rarity_label": "🔵 Редкий",
+        "bonus_type": "luck", "base_bonus": 7,
+        "description": "Выпадает только с 🌯 Духа прокисшей шаурмы. Странно пахнет, но приносит удачу.",
+        "weight": 15, "upgrade_cost_base": 300,
+        "boss_only": "shaurma_ghost",
+    },
+    "tishina_bloknot": {
+        "name": "📓 Блокнот абсолютной тишины", "rarity": "epic", "rarity_label": "🟣 Эпик",
+        "bonus_type": "xp", "base_bonus": 13,
+        "description": "Выпадает только с 📚 Библиотечного Молчуна. Записи в нём появляются сами по себе.",
+        "weight": 7, "upgrade_cost_base": 700,
+        "boss_only": "biblioteka_silence",
+    },
+    "spravka_pechati": {
+        "name": "📑 Справка с тремя печатями", "rarity": "epic", "rarity_label": "🟣 Эпик",
+        "bonus_type": "coins", "base_bonus": 15,
+        "description": "Выпадает только с 💸 Демона невыплаченной стипендии. Открывает любую кассу бухгалтерии.",
+        "weight": 7, "upgrade_cost_base": 700,
+        "boss_only": "stipendiya_demon",
+    },
+    "draconya_cheshuya": {
+        "name": "🐲 Чешуя дракона приёмной", "rarity": "legendary", "rarity_label": "🟡 Легендарный",
+        "bonus_type": "both", "base_bonus": 24,
+        "description": "Выпадает только с 🐲 Дракона приёмной ректора. Секретари теперь боятся тебя, а не наоборот.",
+        "weight": 1, "upgrade_cost_base": 1800,
+        "boss_only": "rektorat_dracon",
+    },
+    "pechat_gak": {
+        "name": "👁 Печать ГАК", "rarity": "legendary", "rarity_label": "🟡 Легендарный",
+        "bonus_type": "both", "base_bonus": 30,
+        "description": "Выпадает только с 👁 Тайной комиссии ГАК. Сильнейший артефакт университета «Манас».",
+        "weight": 1, "upgrade_cost_base": 2200,
+        "boss_only": "gak_commission",
     },
 }
 
@@ -1346,11 +1436,6 @@ async def cmd_hug(message: Message):
         f"📊 Уровень: <b>{level_name}</b> ({rel['xp']} XP)"
     )
 
-
-@dp.message(
-    F.chat.type.in_({"group", "supergroup"}),
-    F.text.func(lambda t: t and t.strip().lower().startswith("подарок"))
-)
 def build_gift_menu_text(sender: dict, target_name: str) -> str:
     lines = [f"🎁 <b>Выбери подарок для {target_name}</b>\n"]
     for g in GIFTS.values():
@@ -1490,8 +1575,12 @@ async def _send_my_relationships(message: Message, uid: int):
 
 @dp.message(
     F.chat.type.in_({"group", "supergroup"}),
-    F.text.func(lambda t: t and t.strip().lower() == "отношения" or t.strip().lower().startswith("отношения "))
+    F.text.func(lambda t: t and (
+        t.strip().lower() == "отношения" or
+        t.strip().lower().startswith("отношения ")
+    ))
 )
+
 async def cmd_relationships_group(message: Message):
     uid = message.from_user.id
     get_user_safe(uid, message.from_user.username or message.from_user.full_name)
@@ -5428,11 +5517,13 @@ async def cmd_give_pet(message: Message):
     parts = message.text.strip().split()
     target_id, key = _resolve_id_and_arg(message, parts)
     if not target_id or not key or key not in PETS:
-        keys = "\n".join(f"  <code>{k}</code> — {v['name']}" for k, v in PETS.items())
+        normal_keys = "\n".join(f"  <code>{k}</code> — {v['name']}" for k, v in PETS.items() if not v.get("admin_only"))
+        admin_keys  = "\n".join(f"  <code>{k}</code> — {v['name']} 👑" for k, v in PETS.items() if v.get("admin_only"))
         await message.answer(
             "❌ Формат:\n<code>/give_pet 12345678 dragon</code>\n"
             "или ответом: <code>/give_pet dragon</code>\n\n"
-            f"Доступные питомцы:\n{keys}"
+            f"Обычные питомцы:\n{normal_keys}\n\n"
+            f"👑 Админские питомцы (только вручную):\n{admin_keys}"
         )
         return
     register_user(target_id)
@@ -5450,8 +5541,8 @@ async def cmd_give_pet(message: Message):
         if not user.get("active_pet"):
             update_user(target_id, active_pet=key)
     update_user(target_id, pet_collection=json.dumps(collection))
-    await message.answer(f"✅ Питомец <b>{pet['name']}</b> выдан пользователю <code>{target_id}</code>")
-
+    tag = " 👑 (админский)" if pet.get("admin_only") else ""
+    await message.answer(f"✅ Питомец <b>{pet['name']}</b>{tag} выдан пользователю <code>{target_id}</code>")
 
 @dp.message(Command("give_boss_item"))
 async def cmd_give_boss_item(message: Message):
@@ -6734,6 +6825,39 @@ PETS = {
         "base_bonus": 20, "luck_bonus": 10,
         "description": "Существо из легенд. Максимальный бонус.",
         "weight": 1, "weight_premium": 5,
+    },
+# ── Админские питомцы (не выпадают в гаче, только вручную) ──
+    "rectors_ufo": {
+        "name": "🛸 НЛО Ректора", "rarity": "admin", "rarity_label": "👑 Админский",
+        "bonus_type": "both", "bonus_label": "монеты И опыт",
+        "base_bonus": 30, "luck_bonus": 15,
+        "description": "Секретный транспорт ректора. Выдаётся только администрацией.",
+        "weight": 0, "weight_premium": 0,
+        "admin_only": True,
+    },
+    "founder_spirit": {
+        "name": "💀 Дух Основателя", "rarity": "admin", "rarity_label": "👑 Админский",
+        "bonus_type": "coins", "bonus_label": "монеты с работы",
+        "base_bonus": 35, "luck_bonus": 5,
+        "description": "Дух того, кто заложил первый камень КТУ «Манас». Даётся вручную.",
+        "weight": 0, "weight_premium": 0,
+        "admin_only": True,
+    },
+    "cosmic_manul": {
+        "name": "🌌 Космический Манул", "rarity": "admin", "rarity_label": "👑 Админский",
+        "bonus_type": "xp", "bonus_label": "опыт с работы",
+        "base_bonus": 35, "luck_bonus": 5,
+        "description": "Манул, побывавший на орбите. Легенда среди легенд. Выдаётся только вручную.",
+        "weight": 0, "weight_premium": 0,
+        "admin_only": True,
+    },
+    "golden_scepter_beast": {
+        "name": "🔱 Зверь Золотого Скипетра", "rarity": "admin", "rarity_label": "👑 Админский",
+        "bonus_type": "both", "bonus_label": "монеты И опыт",
+        "base_bonus": 40, "luck_bonus": 20,
+        "description": "Абсолютный максимум силы. Реликвия, врученная лично администрацией.",
+        "weight": 0, "weight_premium": 0,
+        "admin_only": True,
     },
 }
 
