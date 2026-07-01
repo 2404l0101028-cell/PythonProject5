@@ -2281,7 +2281,7 @@ def init_db():
                 ("referred_by", "BIGINT DEFAULT NULL"),
                 ("referral_count", "INTEGER DEFAULT 0"),
                 ("referral_earned", "INTEGER DEFAULT 0"),
-                ("is_banned", "INTEGER DEFAULT 0")
+                ("is_banned", "INTEGER DEFAULT 0"),
                 ("hunting_level", "INTEGER DEFAULT 0"),
                 ("fishing_level", "INTEGER DEFAULT 0"),
                 ("mining_level", "INTEGER DEFAULT 0"),
