@@ -4797,7 +4797,10 @@ active_marriage_proposals: dict[int, dict] = {}
 
 @dp.message(
     F.chat.type.in_({"group", "supergroup"}),
-    F.text.func(lambda t: t and t.strip().lower().startswith("брак "))
+    F.text.func(lambda t: t and (
+        t.strip().lower() == "брак" or
+        t.strip().lower().startswith("брак ")
+    ))
 )
 async def marriage_propose(message: Message):
     chat_id       = message.chat.id
@@ -5636,7 +5639,7 @@ def get_combined_bonus(user: dict) -> tuple[int, int, int]:
     )
 
 
-def apply_full_coin_bonus(user: dict, amount: int) -> int:
+def apply_combined_coin_bonus(user: dict, amount: int) -> int:
     coin_pct, _, _ = get_combined_bonus(user)
     return int(amount * (1 + coin_pct / 100))
 
@@ -5648,15 +5651,9 @@ def apply_combined_xp_bonus(user: dict, amount: int) -> int:
 
 def apply_full_coin_bonus(user: dict, amount: int) -> int:
     """Комбинированный бонус (питомец+титул+брак) ПЛЮС множитель активного ивента."""
-    amount = apply_full_coin_bonus(user, amount)
+    amount = apply_combined_coin_bonus(user, amount)    # ← теперь вызывает переименованную базовую
     ev_coins_mult, _, _, _ = get_event_multipliers()
     return int(amount * ev_coins_mult)
-
-
-def apply_full_xp_bonus(user: dict, amount: int) -> int:
-    amount = apply_combined_xp_bonus(user, amount)
-    _, ev_xp_mult, _, _ = get_event_multipliers()
-    return int(amount * ev_xp_mult)
 
 
 def grant_achievement_now(user_id: int, key: str) -> str | None:
