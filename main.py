@@ -24,9 +24,14 @@ BOT_TOKEN    = os.getenv("BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 ADMIN_ID = 5908271287
-WORK_COOLDOWN     = 300
+WORK_COOLDOWN     = 150
 WORK_ENERGY_COST  = 15
 TRAIN_ENERGY_COST = 50
+
+REFERRAL_BONUS_COINS_REFERRER = 500  # бонус тому, кто пригласил
+REFERRAL_BONUS_EXP_REFERRER = 150
+REFERRAL_BONUS_COINS_NEWBIE = 200  # бонус новому игроку за переход по ссылке
+REFERRAL_BONUS_EXP_NEWBIE = 50
 
 # =====================================================================
 # ИНИЦИАЛИЗАЦИЯ БОТА И ДИСПЕТЧЕРА
@@ -37,6 +42,25 @@ bot = Bot(
 )
 dp = Dispatcher()
 
+from aiogram import BaseMiddleware
+from typing import Callable, Dict, Any, Awaitable
+
+
+class BanCheckMiddleware(BaseMiddleware):
+    async def __call__(
+            self,
+            handler: Callable[[Message, Dict[str, Any]], Awaitable[Any]],
+            event: Message,
+            data: Dict[str, Any],
+    ) -> Any:
+        if event.from_user and event.from_user.id != ADMIN_ID:
+            user = get_user(event.from_user.id)
+            if user and user.get("is_banned"):
+                return  # молча игнорируем всё от забаненного игрока
+        return await handler(event, data)
+
+
+dp.message.middleware(BanCheckMiddleware())
 # =====================================================================
 # ПОДКЛЮЧЕНИЕ К PostgreSQL
 # =====================================================================
@@ -460,6 +484,10 @@ class TrainCallback(CallbackData, prefix="train"):
 
 class UpgradeJobCallback(CallbackData, prefix="upjob"):
     job_key: str
+
+class GiftCallback(CallbackData, prefix="gift"):
+    gift_key: str
+    target_id: int
 
 class BunkerModeCallback(CallbackData, prefix="bunker_mode"):
     mode: str
@@ -1133,6 +1161,484 @@ ACHIEVEMENTS = {
     },
 }
 
+RELATIONSHIP_LEVELS = [
+    (0, "🤝 Знакомые"),
+    (100, "😊 Приятели"),
+    (300, "🙂 Друзья"),
+    (700, "💛 Близкие друзья"),
+    (1500, "💞 Родственные души"),
+    (3000, "💘 Неразлучники"),
+    (6000, "👑 Легендарная пара"),
+]
+
+HUG_COOLDOWN_SECONDS = 3600  # обнять — раз в час на пару
+
+GIFTS = {
+    "tea": {
+        "name": "🍵 Турецкий чай", "price": 30, "rel_xp": 10,
+        "description": "Маленький, но тёплый жест внимания.",
+    },
+    "simit": {
+        "name": "🥨 Симит", "price": 40, "rel_xp": 12,
+        "description": "Свежий бублик из коридоров Манаса.",
+    },
+    "flower": {
+        "name": "🌷 Тюльпан", "price": 60, "rel_xp": 15,
+        "description": "Один цветок, но от души.",
+    },
+    "chocolate": {
+        "name": "🍫 Шоколадка", "price": 90, "rel_xp": 20,
+        "description": "Классика, которая работает всегда.",
+    },
+    "shawarma": {
+        "name": "🌯 Шаурма из Джала", "price": 100, "rel_xp": 22,
+        "description": "Пропитание — тоже проявление любви.",
+    },
+    "teddy_bear": {
+        "name": "🧸 Плюшевый мишка", "price": 250, "rel_xp": 40,
+        "description": "Мягкий и очень милый подарок.",
+    },
+    "bouquet": {
+        "name": "💐 Букет роз", "price": 400, "rel_xp": 65,
+        "description": "Настоящий романтический жест.",
+    },
+    "perfume": {
+        "name": "🌸 Духи", "price": 600, "rel_xp": 90,
+        "description": "Приятный аромат надолго запомнится.",
+    },
+    "watch": {
+        "name": "⌚ Наручные часы", "price": 1500, "rel_xp": 180,
+        "description": "Стильный и дорогой подарок.",
+    },
+    "phone": {
+        "name": "📱 Новый телефон", "price": 8000, "rel_xp": 700,
+        "description": "Максимальный жест щедрости.",
+    },
+    "ring": {
+        "name": "💍 Кольцо", "price": 15000, "rel_xp": 1200,
+        "description": "Символ серьёзных намерений.",
+    },
+}
+
+hug_cooldowns: dict[tuple[int, int], int] = {}  # (min_id, max_id) -> timestamp
+
+def _pair_key(a: int, b: int) -> tuple[int, int]:
+    return (a, b) if a < b else (b, a)
+
+
+def get_relationship_level_name(xp: int) -> str:
+    name = RELATIONSHIP_LEVELS[0][1]
+    for threshold, lvl_name in RELATIONSHIP_LEVELS:
+        if xp >= threshold:
+            name = lvl_name
+        else:
+            break
+    return name
+
+
+def get_relationship_progress_text(xp: int) -> str:
+    for i, (threshold, name) in enumerate(RELATIONSHIP_LEVELS):
+        if i + 1 < len(RELATIONSHIP_LEVELS):
+            next_threshold, next_name = RELATIONSHIP_LEVELS[i + 1]
+            if xp < next_threshold:
+                return f"📈 До уровня «{next_name}»: ещё {next_threshold - xp} XP"
+        elif xp >= threshold:
+            return "🏆 Максимальный уровень отношений достигнут!"
+    return ""
+
+
+def get_relationship(a: int, b: int) -> dict | None:
+    u1, u2 = _pair_key(a, b)
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM relationships WHERE user1_id = %s AND user2_id = %s",
+                (u1, u2)
+            )
+            row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def add_relationship_xp(a: int, b: int, amount: int) -> dict:
+    u1, u2 = _pair_key(a, b)
+    now = int(time.time())
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO relationships (user1_id, user2_id, xp, last_interaction)
+                VALUES (%s, %s, %s, %s) ON CONFLICT (user1_id, user2_id) DO
+                UPDATE SET
+                    xp = relationships.xp + EXCLUDED.xp,
+                    last_interaction = EXCLUDED.last_interaction
+                """,
+                (u1, u2, amount, now)
+            )
+            conn.commit()
+    return get_relationship(a, b)
+
+
+async def resolve_mention(message: Message) -> tuple[int | None, str | None]:
+    """Возвращает (user_id, full_name) из reply или @mention/text_mention."""
+    if message.reply_to_message and message.reply_to_message.from_user:
+        ru = message.reply_to_message.from_user
+        return ru.id, ru.full_name
+
+    if message.entities:
+        for ent in message.entities:
+            if ent.type == "text_mention" and ent.user:
+                return ent.user.id, ent.user.full_name
+            elif ent.type == "mention":
+                uname = message.text[ent.offset:ent.offset + ent.length]
+                try:
+                    chat_info = await bot.get_chat(uname)
+                    name = (
+                        chat_info.full_name
+                        if getattr(chat_info, "full_name", None)
+                        else (chat_info.first_name or uname)
+                    )
+                    return chat_info.id, name
+                except Exception:
+                    pass
+
+    return None, None
+
+
+@dp.message(
+    F.chat.type.in_({"group", "supergroup"}),
+    F.text.func(lambda t: t and t.strip().lower().startswith("обнять"))
+)
+async def cmd_hug(message: Message):
+    uid = message.from_user.id
+    get_user_safe(uid, message.from_user.username or message.from_user.full_name)
+
+    target_id, target_name = await resolve_mention(message)
+    if not target_id:
+        await message.answer(
+            "❌ Укажи кого обнять: <code>обнять @username</code> или ответом на сообщение."
+        )
+        return
+    if target_id == uid:
+        await message.answer("❌ Нельзя обнять самого себя 😄")
+        return
+
+    register_user(target_id)
+
+    key = _pair_key(uid, target_id)
+    now = int(time.time())
+    last = hug_cooldowns.get(key, 0)
+    if now - last < HUG_COOLDOWN_SECONDS:
+        remaining_min = (HUG_COOLDOWN_SECONDS - (now - last)) // 60
+        await message.answer(f"⏳ Вы уже обнимались недавно! Подожди ещё ~{remaining_min} мин.")
+        return
+    hug_cooldowns[key] = now
+
+    xp_gain = random.randint(10, 20)
+    rel = add_relationship_xp(uid, target_id, xp_gain)
+    level_name = get_relationship_level_name(rel["xp"])
+
+    mention_u = message.from_user.mention_html()
+    mention_t = f"<a href='tg://user?id={target_id}'>{target_name}</a>"
+    await message.answer(
+        f"🤗 {mention_u} обнимает {mention_t}!\n\n"
+        f"💞 +{xp_gain} XP отношений\n"
+        f"📊 Уровень: <b>{level_name}</b> ({rel['xp']} XP)"
+    )
+
+
+@dp.message(
+    F.chat.type.in_({"group", "supergroup"}),
+    F.text.func(lambda t: t and t.strip().lower().startswith("подарок"))
+)
+def build_gift_menu_text(sender: dict, target_name: str) -> str:
+    lines = [f"🎁 <b>Выбери подарок для {target_name}</b>\n"]
+    for g in GIFTS.values():
+        lines.append(
+            f"{g['name']} — <b>{g['price']}</b> мон. (+{g['rel_xp']} XP)\n"
+            f"  <i>{g['description']}</i>"
+        )
+    lines.append(f"\n💰 Твой баланс: <b>{sender['balance']}</b> монет")
+    return "\n\n".join(lines)
+
+
+def get_gift_keyboard(target_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for key, g in GIFTS.items():
+        builder.button(
+            text=f"{g['name']} — {g['price']} мон.",
+            callback_data=GiftCallback(gift_key=key, target_id=target_id).pack()
+        )
+    builder.button(text="❌ Отмена", callback_data="gift_cancel")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+@dp.message(
+    F.chat.type.in_({"group", "supergroup"}),
+    F.text.func(lambda t: t and t.strip().lower().startswith("подарок"))
+)
+async def cmd_gift(message: Message):
+    uid = message.from_user.id
+    sender = get_user_safe(uid, message.from_user.username or message.from_user.full_name)
+
+    target_id, target_name = await resolve_mention(message)
+
+    if not target_id:
+        await message.answer(
+            "❌ Укажи, кому дарить подарок:\n"
+            "<code>подарок @username</code>\n"
+            "или ответом на сообщение: <code>подарок</code>"
+        )
+        return
+    if target_id == uid:
+        await message.answer("❌ Нельзя подарить подарок самому себе.")
+        return
+
+    register_user(target_id)
+
+    await message.answer(
+        build_gift_menu_text(sender, target_name),
+        reply_markup=get_gift_keyboard(target_id)
+    )
+
+
+@dp.callback_query(GiftCallback.filter())
+async def callback_send_gift(callback: CallbackQuery, callback_data: GiftCallback):
+    sender_id = callback.from_user.id
+    target_id = callback_data.target_id
+    gift = GIFTS.get(callback_data.gift_key)
+
+    if not gift:
+        await callback.answer("❌ Такого подарка нет.", show_alert=True)
+        return
+    if sender_id == target_id:
+        await callback.answer("❌ Нельзя дарить подарок самому себе.", show_alert=True)
+        return
+
+    sender = get_user_safe(sender_id)
+    if sender["balance"] < gift["price"]:
+        await callback.answer(
+            f"❌ Недостаточно монет! Нужно {gift['price']}, есть {sender['balance']}.",
+            show_alert=True
+        )
+        return
+
+    register_user(target_id)
+
+    update_user(sender_id, balance=sender["balance"] - gift["price"])
+    change_reputation(sender_id, +1)
+
+    rel = add_relationship_xp(sender_id, target_id, gift["rel_xp"])
+    level_name = get_relationship_level_name(rel["xp"])
+
+    target_data = get_user(target_id)
+    target_name = (target_data.get("username") if target_data else None) or f"#{target_id}"
+    mention_s = callback.from_user.mention_html()
+    mention_t = f"<a href='tg://user?id={target_id}'>{target_name}</a>"
+
+    await callback.answer("🎁 Подарок отправлен!", show_alert=True)
+    await callback.message.edit_text(
+        f"🎁 {mention_s} дарит {mention_t} {gift['name']}!\n\n"
+        f"<i>{gift['description']}</i>\n\n"
+        f"💞 +{gift['rel_xp']} XP отношений\n"
+        f"📊 Уровень: <b>{level_name}</b> ({rel['xp']} XP)"
+    )
+
+    updated_sender = get_user(sender_id)
+    if updated_sender:
+        check_and_grant_achievements(updated_sender)
+
+
+@dp.callback_query(F.data == "gift_cancel")
+async def callback_gift_cancel(callback: CallbackQuery):
+    await callback.answer("Отменено.")
+    await callback.message.edit_text("🎁 Дарение подарка отменено.")
+
+async def _send_my_relationships(message: Message, uid: int):
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM relationships
+                WHERE user1_id = %s
+                   OR user2_id = %s
+                ORDER BY xp DESC LIMIT 15
+                """,
+                (uid, uid)
+            )
+            rows = cur.fetchall()
+
+    if not rows:
+        await message.answer(
+            "💞 У тебя пока нет отношений ни с кем.\n"
+            "Напиши <code>обнять @username</code> (или ответом на сообщение), чтобы начать!"
+        )
+        return
+
+    lines = ["💞 <b>Твои отношения</b>\n"]
+    for row in rows:
+        other_id = row["user2_id"] if row["user1_id"] == uid else row["user1_id"]
+        other = get_user(other_id)
+        name = (other.get("username") if other else None) or f"#{other_id}"
+        level_name = get_relationship_level_name(row["xp"])
+        lines.append(f"• <b>{name}</b> — {level_name} ({row['xp']} XP)")
+
+    await message.answer("\n".join(lines))
+
+
+@dp.message(
+    F.chat.type.in_({"group", "supergroup"}),
+    F.text.func(lambda t: t and t.strip().lower() == "отношения" or t.strip().lower().startswith("отношения "))
+)
+async def cmd_relationships_group(message: Message):
+    uid = message.from_user.id
+    get_user_safe(uid, message.from_user.username or message.from_user.full_name)
+
+    target_id, target_name = await resolve_mention(message)
+
+    if not target_id:
+        # без указания цели -> показываем свой список
+        await _send_my_relationships(message, uid)
+        return
+
+    if target_id == uid:
+        await message.answer("❌ Нельзя иметь отношения с самим собой 😄")
+        return
+
+    register_user(target_id)
+    rel = get_relationship(uid, target_id)
+    xp = rel["xp"] if rel else 0
+    level_name = get_relationship_level_name(xp)
+    progress = get_relationship_progress_text(xp)
+
+    await message.answer(
+        f"💞 <b>Отношения с {target_name}</b>\n\n"
+        f"Уровень: <b>{level_name}</b>\n"
+        f"XP: <b>{xp}</b>\n\n"
+        f"{progress}\n\n"
+        f"<i>Качайте отношения через <code>обнять</code> и <code>подарок</code>!</i>"
+    )
+
+
+@dp.message(Command("relationships"), F.chat.type == "private")
+@dp.message(F.text == "💞 Отношения", F.chat.type == "private")
+async def cmd_relationships_private(message: Message):
+    await _send_my_relationships(message, message.from_user.id)
+
+
+async def _build_top_users_text(field: str, label: str, emoji: str = "🏆", limit: int = 10) -> str:
+    """field должен быть одним из строго заданных имён колонок — не подставляй сюда пользовательский ввод."""
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                f"SELECT user_id, username, {field} AS val FROM users ORDER BY {field} DESC LIMIT %s",
+                (limit,)
+            )
+            rows = cur.fetchall()
+
+    if not rows:
+        return f"Рейтинг «{label}» пока пуст."
+
+    medals = ["🥇", "🥈", "🥉"]
+    lines = [f"{emoji} <b>Топ-{limit}: {label}</b>\n"]
+    for i, row in enumerate(rows, 1):
+        medal = medals[i - 1] if i <= 3 else f"{i}."
+        name = row["username"] or f"#{row['user_id']}"
+        lines.append(f"{medal} <b>{name}</b> — {row['val']}")
+    return "\n".join(lines)
+
+
+@dp.message(Command("top_level"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("топ уровней", "топ уровень")))
+async def cmd_top_level(message: Message):
+    await message.answer(await _build_top_users_text("level", "Уровень", "⭐"))
+
+
+@dp.message(Command("top_rep"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("топ репутации", "топ реп")))
+async def cmd_top_rep(message: Message):
+    await message.answer(await _build_top_users_text("reputation", "Репутация", "🌟"))
+
+
+@dp.message(Command("top_ref"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("топ рефералов", "топ рефералы")))
+async def cmd_top_ref(message: Message):
+    await message.answer(await _build_top_users_text("referral_count", "Рефералы", "🔗"))
+    # ^ работает, только если ты уже добавил реферальную систему (referral_count в БД)
+
+
+@dp.message(Command("top_relationships"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("топ отношений", "топ пар")))
+async def cmd_top_relationships(message: Message):
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT r.user1_id,
+                       r.user2_id,
+                       r.xp,
+                       u1.username AS name1,
+                       u2.username AS name2
+                FROM relationships r
+                         LEFT JOIN users u1 ON u1.user_id = r.user1_id
+                         LEFT JOIN users u2 ON u2.user_id = r.user2_id
+                ORDER BY r.xp DESC LIMIT 10
+                """
+            )
+            rows = cur.fetchall()
+
+    if not rows:
+        await message.answer("💞 Пока никто не качал отношения. Начни первым: <code>обнять @username</code>")
+        return
+
+    medals = ["🥇", "🥈", "🥉"]
+    lines = ["💞 <b>Топ-10 отношений</b>\n"]
+    for i, row in enumerate(rows, 1):
+        medal = medals[i - 1] if i <= 3 else f"{i}."
+        n1 = row["name1"] or f"#{row['user1_id']}"
+        n2 = row["name2"] or f"#{row['user2_id']}"
+        level_name = get_relationship_level_name(row["xp"])
+        lines.append(f"{medal} <b>{n1}</b> 💞 <b>{n2}</b> — {level_name} ({row['xp']} XP)")
+
+    await message.answer("\n".join(lines))
+
+
+@dp.message(Command("marriages"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("список браков", "браки", "все браки")))
+async def cmd_marriage_list(message: Message):
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT user_id, username, spouse_id, married_at
+                FROM users
+                WHERE spouse_id IS NOT NULL
+                ORDER BY married_at ASC
+                """
+            )
+            rows = cur.fetchall()
+
+    if not rows:
+        await message.answer("💍 Пока никто не женился.")
+        return
+
+    seen = set()
+    now = int(time.time())
+    lines = ["💍 <b>Список браков</b>\n"]
+    for row in rows:
+        pair = _pair_key(row["user_id"], row["spouse_id"])
+        if pair in seen:
+            continue
+        seen.add(pair)
+        spouse = get_user(row["spouse_id"])
+        name1 = row["username"] or f"#{row['user_id']}"
+        name2 = (spouse.get("username") if spouse else None) or f"#{row['spouse_id']}"
+        days = max(0, (now - (row["married_at"] or now)) // 86400)
+        lines.append(f"👰🤵 <b>{name1}</b> & <b>{name2}</b> — {days} дн. в браке")
+
+    await message.answer("\n".join(lines))
+
 # =====================================================================
 # ТИТУЛЫ
 # =====================================================================
@@ -1342,47 +1848,47 @@ def init_db():
         with conn.cursor() as cur:
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS users (
-                    user_id               BIGINT PRIMARY KEY,
-                    username              TEXT    DEFAULT '',
-                    balance               INTEGER DEFAULT 0,
-                    level                 INTEGER DEFAULT 1,
-                    exp                   INTEGER DEFAULT 0,
-                    job                   TEXT    DEFAULT 'Безработный',
-                    last_work_time        INTEGER DEFAULT 0,
+                                                     user_id BIGINT PRIMARY KEY,
+                                                     username TEXT DEFAULT '',
+                                                     balance INTEGER DEFAULT 0,
+                                                     level INTEGER DEFAULT 1,
+                                                     exp INTEGER DEFAULT 0,
+                                                     job TEXT DEFAULT 'Безработный',
+                                                     last_work_time INTEGER DEFAULT 0,
 
-                    agility               INTEGER DEFAULT 1,
-                    endurance             INTEGER DEFAULT 1,
-                    charisma              INTEGER DEFAULT 1,
-                    intellect             INTEGER DEFAULT 1,
-                    luck                  INTEGER DEFAULT 1,
+                                                     agility INTEGER DEFAULT 1,
+                                                     endurance INTEGER DEFAULT 1,
+                                                     charisma INTEGER DEFAULT 1,
+                                                     intellect INTEGER DEFAULT 1,
+                                                     luck INTEGER DEFAULT 1,
 
-                    communication_level   INTEGER DEFAULT 1,
-                    driving_level         INTEGER DEFAULT 0,
-                    service_level        INTEGER DEFAULT 0,
-                    organization_level    INTEGER DEFAULT 0,
-                    management_level      INTEGER DEFAULT 0,
+                                                     communication_level INTEGER DEFAULT 1,
+                                                     driving_level INTEGER DEFAULT 0,
+                                                     service_level INTEGER DEFAULT 0,
+                                                     organization_level INTEGER DEFAULT 0,
+                                                     management_level INTEGER DEFAULT 0,
 
-                    job_rank              INTEGER DEFAULT 1,
+                                                     job_rank INTEGER DEFAULT 1,
 
-                    has_scooter            INTEGER DEFAULT 0,
-                    has_shaker             INTEGER DEFAULT 0,
-                    has_laptop             INTEGER DEFAULT 0,
-                    has_professor_badge    INTEGER DEFAULT 0,
-                    has_logistics_license  INTEGER DEFAULT 0,
-                    has_import_license     INTEGER DEFAULT 0,
-                    has_dean_seal          INTEGER DEFAULT 0,
-                    has_business_plan      INTEGER DEFAULT 0,
-                    has_franchise_contract INTEGER DEFAULT 0,
+                                                     has_scooter INTEGER DEFAULT 0,
+                                                     has_shaker INTEGER DEFAULT 0,
+                                                     has_laptop INTEGER DEFAULT 0,
+                                                     has_professor_badge INTEGER DEFAULT 0,
+                                                     has_logistics_license INTEGER DEFAULT 0,
+                                                     has_import_license INTEGER DEFAULT 0,
+                                                     has_dean_seal INTEGER DEFAULT 0,
+                                                     has_business_plan INTEGER DEFAULT 0,
+                                                     has_franchise_contract INTEGER DEFAULT 0,
 
-                    hp                    INTEGER DEFAULT 100,
-                    energy                INTEGER DEFAULT 100,
+                                                     hp INTEGER DEFAULT 100,
+                                                     energy INTEGER DEFAULT 100,
 
-                    has_psychology_book   INTEGER DEFAULT 0,
-                    has_driving_license   INTEGER DEFAULT 0,
-                    last_regen_time       INTEGER DEFAULT 0,
-                    has_suit              INTEGER DEFAULT 0,
+                                                     has_psychology_book INTEGER DEFAULT 0,
+                                                     has_driving_license INTEGER DEFAULT 0,
+                                                     last_regen_time INTEGER DEFAULT 0,
+                                                     has_suit INTEGER DEFAULT 0,
 
-                    achievements          TEXT    DEFAULT ''
+                                                     achievements TEXT DEFAULT ''
                 )
             """)
             # миграция: переименование старого скилла charisma_level -> service_level
@@ -1430,6 +1936,36 @@ def init_db():
                             NULL
                         )
                         """)
+            cur.execute('''
+                        CREATE TABLE IF NOT EXISTS relationships
+                        (
+                            id
+                            SERIAL
+                            PRIMARY
+                            KEY,
+                            user1_id
+                            BIGINT
+                            NOT
+                            NULL,
+                            user2_id
+                            BIGINT
+                            NOT
+                            NULL,
+                            xp
+                            INTEGER
+                            DEFAULT
+                            0,
+                            last_interaction
+                            INTEGER
+                            DEFAULT
+                            0,
+                            UNIQUE
+                        (
+                            user1_id,
+                            user2_id
+                        )
+                            )
+                        ''')
 
             for col, definition in [
                 ("username", "TEXT DEFAULT ''"),
@@ -1465,6 +2001,10 @@ def init_db():
                 ("equipped_boss_item", "TEXT DEFAULT ''"),
                 ("boss_cooldowns", "TEXT DEFAULT '{}'"),
                 ("stat_boss_kills", "INTEGER DEFAULT 0"),
+                ("referred_by", "BIGINT DEFAULT NULL"),
+                ("referral_count", "INTEGER DEFAULT 0"),
+                ("referral_earned", "INTEGER DEFAULT 0"),
+                ("is_banned", "INTEGER DEFAULT 0")
             ]:
                 try:
                     with get_conn() as conn:  # <-- отдельное соединение на каждый ALTER
@@ -2229,7 +2769,7 @@ def get_main_menu() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="🛠 Работа"),        KeyboardButton(text="🏋️ Тренировки")],
             [KeyboardButton(text="🧠 Навыки"),        KeyboardButton(text="🛒 Магазин")],
             [KeyboardButton(text="🏠 Недвижимость"),  KeyboardButton(text="📊 Статистика")],
-            [KeyboardButton(text="🎁 Ежедневный")],
+            [KeyboardButton(text="🎁 Ежедневный"),    KeyboardButton(text="🔗 Пригласить друзей")],
         ],
         resize_keyboard=True,
         persistent=True,
@@ -4115,13 +4655,118 @@ async def transfer_money_private(message: Message):
 # =====================================================================
 # ХЕНДЛЕРЫ — ЛИЧНЫЕ СООБЩЕНИЯ
 # =====================================================================
-@dp.message(Command("start"), F.chat.type == "private")
-async def cmd_start_private(message: Message):
-    get_user_safe(message.from_user.id)
+from aiogram.filters import CommandStart, CommandObject
+
+@dp.message(CommandStart(), F.chat.type == "private")
+async def cmd_start_private(message: Message, command: CommandObject):
+    user_id = message.from_user.id
+    is_new_user = get_user(user_id) is None
+
+    user = get_user_safe(user_id, message.from_user.username or message.from_user.full_name)
+
+    referral_bonus_text = ""
+
+    # Обрабатываем реферальную ссылку только для НОВЫХ пользователей
+    if is_new_user and command.args and command.args.startswith("ref_"):
+        raw_id = command.args[len("ref_"):]
+        if raw_id.isdigit():
+            referrer_id = int(raw_id)
+
+            # Защита: нельзя самого себя пригласить
+            if referrer_id != user_id:
+                referrer = get_user(referrer_id)
+                if referrer:
+                    # Помечаем, кто пригласил
+                    update_user(user_id, referred_by=referrer_id)
+
+                    # Бонус новому игроку
+                    updated_newbie = get_user(user_id)
+                    update_user(
+                        user_id,
+                        balance=updated_newbie["balance"] + REFERRAL_BONUS_COINS_NEWBIE,
+                        exp=updated_newbie["exp"] + REFERRAL_BONUS_EXP_NEWBIE,
+                    )
+                    referral_bonus_text = (
+                        f"\n\n🎁 <b>Ты зашёл по приглашению!</b>\n"
+                        f"💰 +{REFERRAL_BONUS_COINS_NEWBIE} монет\n"
+                        f"✨ +{REFERRAL_BONUS_EXP_NEWBIE} XP"
+                    )
+
+                    # Бонус пригласившему
+                    new_ref_balance = referrer["balance"] + REFERRAL_BONUS_COINS_REFERRER
+                    new_ref_exp     = referrer["exp"]     + REFERRAL_BONUS_EXP_REFERRER
+                    update_user(
+                        referrer_id,
+                        balance=new_ref_balance,
+                        exp=new_ref_exp,
+                        referral_count=referrer.get("referral_count", 0) + 1,
+                        referral_earned=referrer.get("referral_earned", 0) + REFERRAL_BONUS_COINS_REFERRER,
+                    )
+
+                    updated_referrer = get_user(referrer_id)
+                    if updated_referrer:
+                        updated_referrer, level_msgs = auto_level_up(updated_referrer)
+                        check_and_grant_achievements(updated_referrer)
+                        level_block = "".join(level_msgs)
+                    else:
+                        level_block = ""
+
+                    try:
+                        newbie_name = message.from_user.full_name
+                        await bot.send_message(
+                            referrer_id,
+                            f"🎉 <b>По твоей ссылке зарегистрировался новый игрок!</b>\n"
+                            f"👤 {newbie_name}\n\n"
+                            f"💰 +{REFERRAL_BONUS_COINS_REFERRER} монет\n"
+                            f"✨ +{REFERRAL_BONUS_EXP_REFERRER} XP"
+                            f"{level_block}"
+                        )
+                    except Exception:
+                        pass  # реферер мог заблокировать бота — не критично
+
     await message.answer(
         f"👋 Привет, <b>{message.from_user.full_name}</b>!\n\n"
-        "Добро пожаловать в игру «МанасWorker»! Используй меню ниже.",
+        f"Добро пожаловать в игру «МанасWorker»! Используй меню ниже."
+        f"{referral_bonus_text}",
         reply_markup=get_main_menu()
+    )
+
+
+@dp.message(Command("ref"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in
+                                  ("реферал", "рефералы", "пригласить", "invite", "ref")))
+async def cmd_referral(message: Message):
+    if message.chat.type != "private":
+        await message.answer(
+            "ℹ️ Реферальную ссылку можно получить в личных сообщениях с ботом.\n"
+            "Напиши мне в личку команду <code>реферал</code>."
+        )
+        return
+
+    user = get_user_safe(
+        message.from_user.id,
+        message.from_user.username or message.from_user.full_name
+    )
+
+    bot_info = await bot.get_me()
+    link = f"https://t.me/{bot_info.username}?start=ref_{message.from_user.id}"
+
+    count = user.get("referral_count", 0)
+    earned = user.get("referral_earned", 0)
+
+    await message.answer(
+        f"🔗 <b>Реферальная система</b>\n\n"
+        f"Приглашай друзей в игру и получай бонусы за каждого!\n\n"
+        f"👥 Приглашено друзей: <b>{count}</b>\n"
+        f"💰 Всего заработано: <b>{earned}</b> монет\n\n"
+        f"🎁 <b>Награда тебе</b> за друга: +{REFERRAL_BONUS_COINS_REFERRER} монет, "
+        f"+{REFERRAL_BONUS_EXP_REFERRER} XP\n"
+        f"🎁 <b>Награда другу</b> при переходе: +{REFERRAL_BONUS_COINS_NEWBIE} монет, "
+        f"+{REFERRAL_BONUS_EXP_NEWBIE} XP\n\n"
+        f"📎 <b>Твоя персональная ссылка:</b>\n"
+        f"<code>{link}</code>\n\n"
+        f"<i>Просто перешли эту ссылку другу — бонусы придут автоматически, "
+        f"как только он запустит бота.</i>"
     )
 
 @dp.message(F.text == "👤 Профиль", F.chat.type == "private")
@@ -4558,6 +5203,29 @@ def admin_only(func):
         await func(message, *args, **kwargs)
     return wrapper
 
+def _resolve_id_and_arg(message: Message, parts: list[str]) -> tuple[int | None, str | None]:
+    """
+    Поддерживает 2 формата:
+      - ответом на сообщение:   /команда аргумент
+      - без ответа:             /команда id аргумент
+    Возвращает (target_id, arg) или (None, None).
+    """
+    if message.reply_to_message and message.reply_to_message.from_user:
+        target_id = message.reply_to_message.from_user.id
+        arg = " ".join(parts[1:]) if len(parts) >= 2 else None
+        return target_id, arg
+    else:
+        if len(parts) >= 3 and parts[1].isdigit():
+            return int(parts[1]), " ".join(parts[2:])
+    return None, None
+
+def _resolve_id_only(message: Message, parts: list[str]) -> int | None:
+    """Возвращает target_id либо из reply, либо из parts[1]."""
+    if message.reply_to_message and message.reply_to_message.from_user:
+        return message.reply_to_message.from_user.id
+    if len(parts) >= 2 and parts[1].isdigit():
+        return int(parts[1])
+    return None
 
 async def _resolve_target(message: Message, parts: list[str], need_amount: bool = True):
     """Определяет target_id и amount из команды или reply."""
@@ -4644,6 +5312,445 @@ async def cmd_give_exp(message: Message):
         f"✅ Начислено <b>{amount}</b> XP пользователю <code>{target_id}</code>"
         + (f"\n{level_block}" if level_block else "")
     )
+
+
+dp.message(Command("give_item"))
+
+
+async def cmd_give_item(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+    parts = message.text.strip().split()
+    target_id, key = _resolve_id_and_arg(message, parts)
+    if not target_id or not key or key not in SHOP_ITEMS:
+        keys = "\n".join(f"  <code>{k}</code> — {v['name']}" for k, v in SHOP_ITEMS.items())
+        await message.answer(
+            "❌ Формат:\n<code>/give_item 12345678 laptop</code>\n"
+            "или ответом: <code>/give_item laptop</code>\n\n"
+            f"Доступные предметы:\n{keys}"
+        )
+        return
+    register_user(target_id)
+    item = SHOP_ITEMS[key]
+    update_user(target_id, **{item["flag"]: 1})
+    await message.answer(f"✅ Предмет <b>{item['name']}</b> выдан пользователю <code>{target_id}</code>")
+
+
+@dp.message(Command("give_pet"))
+async def cmd_give_pet(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+    import json
+    parts = message.text.strip().split()
+    target_id, key = _resolve_id_and_arg(message, parts)
+    if not target_id or not key or key not in PETS:
+        keys = "\n".join(f"  <code>{k}</code> — {v['name']}" for k, v in PETS.items())
+        await message.answer(
+            "❌ Формат:\n<code>/give_pet 12345678 dragon</code>\n"
+            "или ответом: <code>/give_pet dragon</code>\n\n"
+            f"Доступные питомцы:\n{keys}"
+        )
+        return
+    register_user(target_id)
+    user = get_user(target_id)
+    raw = user.get("pet_collection", "") or "{}"
+    try:
+        collection = json.loads(raw)
+    except Exception:
+        collection = {}
+    pet = PETS[key]
+    if key in collection:
+        collection[key] = min(collection[key] + 1, 20)
+    else:
+        collection[key] = pet["base_bonus"]
+        if not user.get("active_pet"):
+            update_user(target_id, active_pet=key)
+    update_user(target_id, pet_collection=json.dumps(collection))
+    await message.answer(f"✅ Питомец <b>{pet['name']}</b> выдан пользователю <code>{target_id}</code>")
+
+
+@dp.message(Command("give_boss_item"))
+async def cmd_give_boss_item(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+    parts = message.text.strip().split()
+    target_id, key = _resolve_id_and_arg(message, parts)
+    if not target_id or not key or key not in BOSS_ITEMS:
+        keys = "\n".join(f"  <code>{k}</code> — {v['name']}" for k, v in BOSS_ITEMS.items())
+        await message.answer(
+            "❌ Формат:\n<code>/give_boss_item 12345678 manas_bow</code>\n"
+            "или ответом: <code>/give_boss_item manas_bow</code>\n\n"
+            f"Доступные предметы:\n{keys}"
+        )
+        return
+    register_user(target_id)
+    user = get_user(target_id)
+    items = get_boss_items(user)
+    if key in items:
+        items[key] += 1
+    else:
+        items[key] = 1
+        if not user.get("equipped_boss_item"):
+            update_user(target_id, equipped_boss_item=key)
+    save_boss_items(target_id, items)
+    await message.answer(f"✅ Предмет <b>{BOSS_ITEMS[key]['name']}</b> выдан пользователю <code>{target_id}</code>")
+
+
+@dp.message(Command("give_property"))
+async def cmd_give_property(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+    parts = message.text.strip().split()
+    target_id, key = _resolve_id_and_arg(message, parts)
+    if not target_id or not key or key not in PROPERTIES:
+        keys = "\n".join(f"  <code>{k}</code> — {v['name']}" for k, v in PROPERTIES.items())
+        await message.answer(
+            "❌ Формат:\n<code>/give_property 12345678 kiosk</code>\n"
+            "или ответом: <code>/give_property kiosk</code>\n\n"
+            f"Доступная недвижимость:\n{keys}"
+        )
+        return
+    register_user(target_id)
+    user = get_user(target_id)
+    props = get_user_properties(user)
+    props[key] = int(time.time())
+    save_user_properties(target_id, props)
+    await message.answer(
+        f"✅ Недвижимость <b>{PROPERTIES[key]['name']}</b> выдана пользователю <code>{target_id}</code>")
+
+
+@dp.message(Command("give_shards"))
+async def cmd_give_shards(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+    parts = message.text.strip().split()
+    target_id, amount_str = _resolve_id_and_arg(message, parts)
+    if not target_id or not amount_str or not amount_str.lstrip("-").isdigit():
+        await message.answer(
+            "❌ Формат:\n<code>/give_shards 12345678 100</code>\n"
+            "или ответом: <code>/give_shards 100</code>"
+        )
+        return
+    amount = int(amount_str)
+    register_user(target_id)
+    user = get_user(target_id)
+    new_shards = max(0, user.get("shards", 0) + amount)
+    update_user(target_id, shards=new_shards)
+    await message.answer(
+        f"✅ Осколки пользователя <code>{target_id}</code>: <b>{new_shards}</b> "
+        f"(изменение: {amount:+d})"
+    )
+
+
+@dp.message(Command("give_achievement"))
+async def cmd_give_achievement(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+    parts = message.text.strip().split()
+    target_id, key = _resolve_id_and_arg(message, parts)
+    if not target_id or not key or key not in ACHIEVEMENTS:
+        keys = "\n".join(f"  <code>{k}</code>" for k in ACHIEVEMENTS)
+        await message.answer(
+            "❌ Формат:\n<code>/give_achievement 12345678 first_work</code>\n"
+            "или ответом: <code>/give_achievement first_work</code>\n\n"
+            f"Доступные ключи:\n{keys}"
+        )
+        return
+    register_user(target_id)
+    msg = grant_achievement_now(target_id, key)
+    if msg:
+        await message.answer(f"✅ Достижение выдано пользователю <code>{target_id}</code>:\n{msg}")
+    else:
+        await message.answer("ℹ️ У пользователя уже есть это достижение (или ключ неверный).")
+
+
+@dp.message(Command("set_job"))
+async def cmd_set_job(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+    parts = message.text.strip().split()
+    target_id, job_key = _resolve_id_and_arg(message, parts)
+    if not target_id or not job_key or job_key not in JOBS:
+        keys = "\n".join(f"  <code>{k}</code> — {v['name']}" for k, v in JOBS.items())
+        await message.answer(
+            "❌ Формат:\n<code>/set_job 12345678 intel_3</code>\n"
+            "или ответом: <code>/set_job intel_3</code>\n\n"
+            f"Доступные профессии:\n{keys}"
+        )
+        return
+    register_user(target_id)
+    update_user(target_id, job=JOBS[job_key]["name"], job_rank=1)
+    await message.answer(
+        f"✅ Профессия пользователя <code>{target_id}</code> установлена: "
+        f"<b>{JOBS[job_key]['name']}</b>"
+    )
+
+
+@dp.message(Command("set_energy"))
+async def cmd_set_energy(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+    parts = message.text.strip().split()
+    target_id, val_str = _resolve_id_and_arg(message, parts)
+    if not target_id or not val_str or not val_str.isdigit():
+        await message.answer(
+            "❌ Формат: <code>/set_energy 12345678 100</code> "
+            "или ответом: <code>/set_energy 100</code>"
+        )
+        return
+    register_user(target_id)
+    update_user(target_id, energy=int(val_str))
+    await message.answer(f"✅ Энергия пользователя <code>{target_id}</code> установлена: <b>{val_str}</b>")
+
+
+@dp.message(Command("set_hp"))
+async def cmd_set_hp(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+    parts = message.text.strip().split()
+    target_id, val_str = _resolve_id_and_arg(message, parts)
+    if not target_id or not val_str or not val_str.isdigit():
+        await message.answer(
+            "❌ Формат: <code>/set_hp 12345678 100</code> "
+            "или ответом: <code>/set_hp 100</code>"
+        )
+        return
+    register_user(target_id)
+    update_user(target_id, hp=int(val_str))
+    await message.answer(f"✅ HP пользователя <code>{target_id}</code> установлено: <b>{val_str}</b>")
+
+
+@dp.message(Command("reset_cooldown"))
+async def cmd_reset_cooldown(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+    parts = message.text.strip().split()
+    target_id = _resolve_id_only(message, parts)
+    if not target_id:
+        await message.answer(
+            "❌ Формат: <code>/reset_cooldown 12345678</code> "
+            "или ответом на сообщение игрока"
+        )
+        return
+    register_user(target_id)
+    update_user(target_id, last_work_time=0)
+    await message.answer(f"✅ Кулдаун работы сброшен для <code>{target_id}</code>")
+
+
+dp.message(Command("ban"))
+
+
+async def cmd_ban_user(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+    parts = message.text.strip().split()
+    target_id = _resolve_id_only(message, parts)
+    if not target_id:
+        await message.answer(
+            "❌ Формат: <code>/ban 12345678</code> или ответом на сообщение игрока"
+        )
+        return
+    if target_id == ADMIN_ID:
+        await message.answer("❌ Нельзя забанить самого себя.")
+        return
+    register_user(target_id)
+    update_user(target_id, is_banned=1)
+    await message.answer(f"🚫 Пользователь <code>{target_id}</code> заблокирован в игре.")
+
+
+@dp.message(Command("unban"))
+async def cmd_unban_user(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+    parts = message.text.strip().split()
+    target_id = _resolve_id_only(message, parts)
+    if not target_id:
+        await message.answer(
+            "❌ Формат: <code>/unban 12345678</code> или ответом на сообщение игрока"
+        )
+        return
+    register_user(target_id)
+    update_user(target_id, is_banned=0)
+    await message.answer(f"✅ Пользователь <code>{target_id}</code> разблокирован.")
+
+
+@dp.message(Command("user_info"))
+async def cmd_user_info(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+    parts = message.text.strip().split()
+    target_id = _resolve_id_only(message, parts)
+    if not target_id:
+        await message.answer(
+            "❌ Формат: <code>/user_info 12345678</code> или ответом на сообщение игрока"
+        )
+        return
+    user = get_user(target_id)
+    if not user:
+        await message.answer("❌ Пользователь не найден в базе.")
+        return
+    job = get_job(user)
+    await message.answer(
+        f"🔍 <b>Инфо об игроке</b> <code>{target_id}</code>\n\n"
+        f"👤 Username: @{user.get('username') or '—'}\n"
+        f"⭐ Уровень: {user['level']} | XP: {user['exp']}\n"
+        f"💰 Баланс: {user['balance']}\n"
+        f"🔶 Осколки: {user.get('shards', 0)}\n"
+        f"💼 Профессия: {user['job']} (грейд {job['grade'] if job else 0})\n"
+        f"❤️ HP: {user['hp']} | ⚡ Энергия: {user['energy']}\n"
+        f"⭐ Репутация: {user.get('reputation', 0)}\n"
+        f"🎖 Титул: {user.get('active_title') or '—'}\n"
+        f"💍 Супруг: {user.get('spouse_id') or '—'}\n"
+        f"🐾 Питомец: {user.get('active_pet') or '—'}\n"
+        f"🔗 Приглашено рефералов: {user.get('referral_count', 0)}\n"
+        f"🚫 Забанен: {'Да' if user.get('is_banned') else 'Нет'}"
+    )
+
+
+ADMIN_HELP_CATEGORIES = {
+    "economy": {
+        "label": "💰 Экономика",
+        "text": (
+            "💰 <b>Экономика</b>\n\n"
+            "<code>/give_money [id] сумма</code> — начислить монеты\n"
+            "<code>/give_exp [id] сумма</code> — начислить опыт\n"
+            "<code>/give_shards [id] сумма</code> — начислить осколки\n\n"
+            "<i>Вместо [id] можно ответить на сообщение игрока</i>"
+        ),
+    },
+    "stats": {
+        "label": "📊 Характеристики",
+        "text": (
+            "📊 <b>Характеристики и ресурсы</b>\n\n"
+            "<code>/set_stat [id] стат значение</code> — установить характеристику/навык\n"
+            "<code>/set_energy [id] значение</code> — установить энергию\n"
+            "<code>/set_hp [id] значение</code> — установить HP\n"
+            "<code>/reset_cooldown [id]</code> — сбросить кулдаун работы\n"
+            "<code>/reset_daily [id]</code> — сбросить ежедневный бонус"
+        ),
+    },
+    "items": {
+        "label": "🎒 Предметы и питомцы",
+        "text": (
+            "🎒 <b>Предметы, питомцы, недвижимость</b>\n\n"
+            "<code>/give_item [id] ключ</code> — выдать снаряжение\n"
+            "<code>/give_pet [id] ключ</code> — выдать питомца\n"
+            "<code>/give_boss_item [id] ключ</code> — выдать трофей с босса\n"
+            "<code>/give_property [id] ключ</code> — выдать недвижимость"
+        ),
+    },
+    "progression": {
+        "label": "🏆 Прогресс",
+        "text": (
+            "🏆 <b>Профессии, титулы, достижения</b>\n\n"
+            "<code>/set_job [id] job_key</code> — установить профессию\n"
+            "<code>/give_title [id] ключ</code> — выдать титул\n"
+            "<code>/remove_title [id] ключ</code> — снять титул\n"
+            "<code>/give_achievement [id] ключ</code> — выдать достижение"
+        ),
+    },
+    "moderation": {
+        "label": "🚫 Модерация",
+        "text": (
+            "🚫 <b>Модерация</b>\n\n"
+            "<code>/ban [id]</code> — заблокировать игрока\n"
+            "<code>/unban [id]</code> — разблокировать игрока\n"
+            "<code>/user_info [id]</code> — посмотреть данные игрока\n\n"
+            "<i>Вместо [id] можно ответить на сообщение игрока</i>"
+        ),
+    },
+    "system": {
+        "label": "⚙️ Система и рассылки",
+        "text": (
+            "⚙️ <b>Система и ивенты</b>\n\n"
+            "<code>/start_event ключ</code> — запустить ивент\n"
+            "<code>/end_event</code> — завершить ивент\n"
+            "<code>/current_event</code> — посмотреть активный ивент\n\n"
+            "📢 <b>Рассылка</b>\n"
+            "<code>объявление текст</code> — рассылка текста всем\n"
+            "<code>объявление</code> (ответом на сообщение) — рассылка копии "
+            "(фото/видео/текст)"
+        ),
+    },
+}
+
+
+@dp.message(Command("admin"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("админ", "admin", "админка")))
+async def cmd_admin_help(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return  # обычным игрокам не отвечаем вообще, чтобы не палить наличие админки
+
+    builder = InlineKeyboardBuilder()
+    for key, cat in ADMIN_HELP_CATEGORIES.items():
+        builder.button(text=cat["label"], callback_data=f"admin_help:{key}")
+    builder.adjust(1)
+    await message.answer(
+        "🛠 <b>Панель администратора</b>\n\nВыбери раздел команд:",
+        reply_markup=builder.as_markup()
+    )
+
+
+@dp.callback_query(F.data.startswith("admin_help:"))
+async def callback_admin_help(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Нет доступа.", show_alert=True)
+        return
+    key = callback.data.split(":")[1]
+    cat = ADMIN_HELP_CATEGORIES.get(key)
+    if not cat:
+        await callback.answer()
+        return
+    builder = InlineKeyboardBuilder()
+    builder.button(text="◀ Назад", callback_data="admin_help_back")
+    await callback.answer()
+    await callback.message.edit_text(cat["text"], reply_markup=builder.as_markup())
+
+
+@dp.callback_query(F.data == "admin_help_back")
+async def callback_admin_help_back(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Нет доступа.", show_alert=True)
+        return
+    builder = InlineKeyboardBuilder()
+    for key, cat in ADMIN_HELP_CATEGORIES.items():
+        builder.button(text=cat["label"], callback_data=f"admin_help:{key}")
+    builder.adjust(1)
+    await callback.answer()
+    await callback.message.edit_text(
+        "🛠 <b>Панель администратора</b>\n\nВыбери раздел команд:",
+        reply_markup=builder.as_markup()
+    )
+
+@dp.message(Command("reset_daily"))
+async def cmd_reset_daily(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+    parts = message.text.strip().split()
+    target_id = _resolve_id_only(message, parts)
+    if not target_id:
+        await message.answer(
+            "❌ Формат: <code>/reset_daily 12345678</code> "
+            "или ответом на сообщение игрока"
+        )
+        return
+    register_user(target_id)
+    update_user(target_id, last_daily_claim=0)
+    await message.answer(f"✅ Ежедневный бонус сброшен для <code>{target_id}</code>")
 
 
 @dp.message(Command("set_stat"))
@@ -7245,6 +8352,118 @@ async def cmd_balance(message: Message):
         f"💰 Монеты: <b>{user['balance']}</b>\n"
         f"🔶 Осколки: <b>{user.get('shards', 0)}</b>"
     )
+@dp.message(F.text == "🔗 Пригласить друзей", F.chat.type == "private")
+async def btn_referral_private(message: Message):
+    await cmd_referral(message)
+
+
+async def _get_all_user_ids() -> list[int]:
+    """Возвращает список всех user_id из таблицы users."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id FROM users")
+            rows = cur.fetchall()
+    return [r[0] for r in rows]
+
+
+async def _broadcast_text(admin_message: Message, content: str):
+    """Рассылает текстовое объявление всем пользователям и группам."""
+    status_msg = await admin_message.answer("📢 Начинаю рассылку...")
+
+    text = f"📢 <b>Объявление от администрации</b>\n\n{content}"
+
+    user_ids = await _get_all_user_ids()
+    sent_users, failed_users = 0, 0
+    for uid in user_ids:
+        try:
+            await bot.send_message(uid, text)
+            sent_users += 1
+        except Exception:
+            failed_users += 1
+        await asyncio.sleep(0.05)  # антифлуд, ~20 сообщений/сек
+
+    sent_chats, failed_chats = 0, 0
+    for chat_id in list(registered_chats):
+        try:
+            await bot.send_message(chat_id, text)
+            sent_chats += 1
+        except Exception:
+            failed_chats += 1
+        await asyncio.sleep(0.05)
+
+    await status_msg.edit_text(
+        f"✅ <b>Рассылка завершена!</b>\n\n"
+        f"👤 Личные сообщения: <b>{sent_users}</b> успешно, <b>{failed_users}</b> ошибок\n"
+        f"👥 Группы: <b>{sent_chats}</b> успешно, <b>{failed_chats}</b> ошибок"
+    )
+
+
+async def _broadcast_copy(admin_message: Message, source_chat_id: int, source_msg_id: int):
+    """Рассылает копию сообщения (текст/фото/видео/документ) всем пользователям и группам."""
+    status_msg = await admin_message.answer("📢 Начинаю рассылку (копия сообщения)...")
+
+    user_ids = await _get_all_user_ids()
+    sent_users, failed_users = 0, 0
+    for uid in user_ids:
+        try:
+            await bot.copy_message(uid, source_chat_id, source_msg_id)
+            sent_users += 1
+        except Exception:
+            failed_users += 1
+        await asyncio.sleep(0.05)
+
+    sent_chats, failed_chats = 0, 0
+    for chat_id in list(registered_chats):
+        try:
+            await bot.copy_message(chat_id, source_chat_id, source_msg_id)
+            sent_chats += 1
+        except Exception:
+            failed_chats += 1
+        await asyncio.sleep(0.05)
+
+    await status_msg.edit_text(
+        f"✅ <b>Рассылка завершена!</b>\n\n"
+        f"👤 Личные сообщения: <b>{sent_users}</b> успешно, <b>{failed_users}</b> ошибок\n"
+        f"👥 Группы: <b>{sent_chats}</b> успешно, <b>{failed_chats}</b> ошибок"
+    )
+
+
+@dp.message(Command("announce"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower().startswith("объявление")))
+async def cmd_announce(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+
+    # Режим 1: ответ на сообщение -> рассылаем копию (работает с фото/видео/текстом)
+    if message.reply_to_message:
+        await _broadcast_copy(
+            message,
+            message.reply_to_message.chat.id,
+            message.reply_to_message.message_id,
+        )
+        return
+
+    # Режим 2: обычный текст после команды
+    raw = message.text.strip()
+    if raw.lower().startswith("/announce"):
+        content = raw[len("/announce"):].strip()
+    else:
+        content = raw[len("объявление"):].strip()
+
+    if not content:
+        await message.answer(
+            "❌ Формат:\n"
+            "<code>объявление Текст объявления</code>\n"
+            "или <code>/announce Текст объявления</code>\n\n"
+            "Либо ответь словом <code>объявление</code> на сообщение "
+            "(в том числе с фото/видео) — разошлю точную копию."
+        )
+        return
+
+    await _broadcast_text(message, content)
+
+
 # =====================================================================
 # ТОЧКА ВХОДА
 # =====================================================================
