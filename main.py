@@ -33,6 +33,24 @@ REFERRAL_BONUS_EXP_REFERRER = 150
 REFERRAL_BONUS_COINS_NEWBIE = 200  # бонус новому игроку за переход по ссылке
 REFERRAL_BONUS_EXP_NEWBIE = 50
 
+REBIRTH_MIN_LEVEL          = 100   # условие для перерождения
+REBIRTH_START_COINS        = 500   # стартовый капитал при 1-м перерождении
+REBIRTH_START_COINS_PER    = 250   # прирост стартового капитала за каждое ПРЕДЫДУЩЕЕ перерождение
+REBIRTH_COIN_BONUS_PER     = 15    # % к монетам за каждое перерождение (постоянно)
+REBIRTH_XP_BONUS_PER       = 15    # % к опыту за каждое перерождение (постоянно)
+
+# req_rebirths -> job_key стартовой профессии, открываемой перерождением
+REBIRTH_STARTER_JOBS = {
+    1: "founder_1",
+    2: "science_1",
+    3: "media_1",
+    4: "politics_1",
+}
+
+ASCENSION_CRYSTALS_BASE   = 50   # кристаллов за 1-е перерождение
+ASCENSION_CRYSTALS_PER    = 25   # + за каждое следующее перерождение
+ASCENSION_GACHA_PRICE     = 30   # кристаллов за 1 круть гачи
+
 # =====================================================================
 # ИНИЦИАЛИЗАЦИЯ БОТА И ДИСПЕТЧЕРА
 # =====================================================================
@@ -423,10 +441,366 @@ JOBS = {
         "evolves_to":  None,
         "special":     "money_king",
     },
+# ══════════ ВЕТКА ОСНОВАТЕЛЯ (открывается перерождением) ══════════
+    "founder_1": {
+        "name":        "🌱 Стажёр Фонда выпускников КТУ",
+        "branch":      "founder", "grade": 1, "min_level": 1,
+        "min_reward":  25, "max_reward":  40,
+        "min_exp":     25, "max_exp":     40,
+        "description": "Ты вернулся с чистого листа, но с опытом за плечами.",
+        "evolves_to":  "founder_2", "req_level": 5,
+    },
+    "founder_2": {
+        "name":        "🎓 Куратор международных грантов",
+        "branch":      "founder", "grade": 2, "min_level": 5,
+        "min_reward":  60, "max_reward":  90,
+        "min_exp":     60, "max_exp":     90,
+        "description": "Раздаёшь гранты и завязываешь нужные связи.",
+        "evolves_to":  "founder_3", "req_level": 10,
+        "req_skill":   ("communication_level", 3),
+    },
+    "founder_3": {
+        "name":        "📊 Советник ректора по стратегии",
+        "branch":      "founder", "grade": 3, "min_level": 10,
+        "min_reward":  140, "max_reward": 210,
+        "min_exp":     140, "max_exp":    210,
+        "description": "Твоё слово теперь имеет вес в кабинете ректора.",
+        "evolves_to":  "founder_4", "req_level": 20,
+        "req_skill":   ("management_level", 3),
+        "req_item":    ("has_laptop", "💻 Ноутбук"),
+    },
+    "founder_4": {
+        "name":        "🏛 Директор Фонда развития КТУ",
+        "branch":      "founder", "grade": 4, "min_level": 20,
+        "min_reward":  320, "max_reward": 460,
+        "min_exp":     320, "max_exp":    460,
+        "description": "Управляешь миллионами сомов на развитие университета.",
+        "evolves_to":  "founder_5", "req_level": 35,
+        "req_skill":   ("management_level", 5),
+        "req_item":    ("has_business_plan", "📊 Бизнес-план"),
+    },
+    "founder_5": {
+        "name":        "🕴 Член Попечительского совета",
+        "branch":      "founder", "grade": 5, "min_level": 35,
+        "min_reward":  700, "max_reward": 980,
+        "min_exp":     700, "max_exp":    980,
+        "description": "Решения, определяющие судьбу КТУ на десятилетия.",
+        "evolves_to":  "founder_6", "req_level": 50,
+        "req_skill":   ("management_level", 7),
+        "req_item":    ("has_dean_seal", "🔏 Декановская печать"),
+    },
+    "founder_6": {
+        "name":        "🕌 Посланник Турции при университете",
+        "branch":      "founder", "grade": 6, "min_level": 50,
+        "min_reward":  1400, "max_reward": 1900,
+        "min_exp":     1400, "max_exp":    1900,
+        "description": "Официальный дипломатический статус.",
+        "evolves_to":  "founder_7", "req_level": 70,
+        "req_skill":   ("management_level", 9),
+        "req_item":    ("has_franchise_contract", "📜 Франшизный контракт"),
+    },
+    "founder_7": {
+        "name":        "🌍 Почётный профессор трёх континентов",
+        "branch":      "founder", "grade": 7, "min_level": 70,
+        "min_reward":  2600, "max_reward": 3400,
+        "min_exp":     2600, "max_exp":    3400,
+        "description": "Твоё имя знают в университетах Азии, Европы и Америки.",
+        "evolves_to":  "founder_8", "req_level": 80,
+        "req_skill":   ("management_level", 10),
+        "req_item":    ("has_logistics_license", "📋 Лицензия логиста"),
+    },
+    "founder_8": {
+        "name":        "👔 Глава ассоциации университетов Центральной Азии",
+        "branch":      "founder", "grade": 8, "min_level": 80,
+        "min_reward":  4200, "max_reward": 5600,
+        "min_exp":     4200, "max_exp":    5600,
+        "description": "Под твоим началом десятки вузов региона.",
+        "evolves_to":  "founder_9", "req_level": 100,
+        "req_skill":   ("management_level", 10),
+        "req_item":    ("has_import_license", "🛃 Импортная лицензия"),
+    },
+    "founder_9": {
+        "name":        "🏆 Легендарный Отец-Основатель нового кампуса",
+        "branch":      "founder", "grade": 9, "min_level": 100,
+        "min_reward":  8000, "max_reward": 12000,
+        "min_exp":     8000, "max_exp":    12000,
+        "description": "Ты заложил новый кампус КТУ своими руками.",
+        "evolves_to":  None,
+        "special":     "founder_king",
+    },
+# ══════════ ВЕТКА НАУКИ (2 перерождение) ══════════
+    "science_1": {
+        "name":        "🧪 Лаборант кафедры Химии",
+        "branch":      "science", "grade": 1, "min_level": 1,
+        "min_reward":  30, "max_reward":  45,
+        "min_exp":     30, "max_exp":     45,
+        "description": "Моешь пробирки, но втайне мечтаешь о Нобелевке.",
+        "evolves_to":  "science_2", "req_level": 5,
+    },
+    "science_2": {
+        "name":        "🔬 Ассистент профессора на грантовом проекте",
+        "branch":      "science", "grade": 2, "min_level": 5,
+        "min_reward":  70, "max_reward":  110,
+        "min_exp":     70, "max_exp":    110,
+        "description": "Пишешь отчёты по гранту, который никто не читает.",
+        "evolves_to":  "science_3", "req_level": 10,
+        "req_skill":   ("communication_level", 3),
+    },
+    "science_3": {
+        "name":        "📄 Автор международных публикаций (Scopus)",
+        "branch":      "science", "grade": 3, "min_level": 10,
+        "min_reward":  170, "max_reward": 260,
+        "min_exp":     170, "max_exp":    260,
+        "description": "Твоё имя теперь можно нагуглить в научной базе.",
+        "evolves_to":  "science_4", "req_level": 20,
+        "req_skill":   ("management_level", 3),
+        "req_item":    ("has_laptop", "💻 Ноутбук"),
+    },
+    "science_4": {
+        "name":        "🧬 Руководитель лаборатории биотехнологий",
+        "branch":      "science", "grade": 4, "min_level": 20,
+        "min_reward":  380, "max_reward": 550,
+        "min_exp":     380, "max_exp":    550,
+        "description": "У тебя своя лаборатория и бюджет на реагенты.",
+        "evolves_to":  "science_5", "req_level": 35,
+        "req_skill":   ("management_level", 5),
+        "req_item":    ("has_business_plan", "📊 Бизнес-план"),
+    },
+    "science_5": {
+        "name":        "🏅 Обладатель гранта Erasmus+",
+        "branch":      "science", "grade": 5, "min_level": 35,
+        "min_reward":  820, "max_reward": 1150,
+        "min_exp":     820, "max_exp":    1150,
+        "description": "Летаешь между университетами Европы с докладами.",
+        "evolves_to":  "science_6", "req_level": 50,
+        "req_skill":   ("management_level", 7),
+        "req_item":    ("has_dean_seal", "🔏 Декановская печать"),
+    },
+    "science_6": {
+        "name":        "🛰 Учёный, сотрудничающий с NASA/ESA",
+        "branch":      "science", "grade": 6, "min_level": 50,
+        "min_reward":  1650, "max_reward": 2250,
+        "min_exp":     1650, "max_exp":    2250,
+        "description": "Твои расчёты используют в реальных космических миссиях.",
+        "evolves_to":  "science_7", "req_level": 70,
+        "req_skill":   ("management_level", 9),
+        "req_item":    ("has_franchise_contract", "📜 Франшизный контракт"),
+    },
+    "science_7": {
+        "name":        "🧠 Изобретатель революционной технологии",
+        "branch":      "science", "grade": 7, "min_level": 70,
+        "min_reward":  3000, "max_reward": 4000,
+        "min_exp":     3000, "max_exp":    4000,
+        "description": "О твоём открытии пишут мировые СМИ.",
+        "evolves_to":  "science_8", "req_level": 80,
+        "req_skill":   ("management_level", 10),
+        "req_item":    ("has_logistics_license", "📋 Лицензия логиста"),
+    },
+    "science_8": {
+        "name":        "🏛 Академик Национальной Академии Наук",
+        "branch":      "science", "grade": 8, "min_level": 80,
+        "min_reward":  4800, "max_reward": 6400,
+        "min_exp":     4800, "max_exp":    6400,
+        "description": "Твоё кресло в Академии наук зарезервировано навсегда.",
+        "evolves_to":  "science_9", "req_level": 100,
+        "req_skill":   ("management_level", 10),
+        "req_item":    ("has_import_license", "🛃 Импортная лицензия"),
+    },
+    "science_9": {
+        "name":        "🏆 Нобелевский лауреат из КТУ «Манас»",
+        "branch":      "science", "grade": 9, "min_level": 100,
+        "min_reward":  9500, "max_reward": 14000,
+        "min_exp":     9500, "max_exp":    14000,
+        "description": "Первый нобелевский лауреат в истории университета.",
+        "evolves_to":  None,
+        "special":     "science_king",
+    },
+# ══════════ ВЕТКА МЕДИА (3 перерождение) ══════════
+    "media_1": {
+        "name":        "📱 Тиктокер с 100 подписчиками",
+        "branch":      "media", "grade": 1, "min_level": 1,
+        "min_reward":  35, "max_reward":  55,
+        "min_exp":     35, "max_exp":     55,
+        "description": "Снимаешь ролики в общаге на телефон мамы.",
+        "evolves_to":  "media_2", "req_level": 5,
+    },
+    "media_2": {
+        "name":        "🎥 Ведущий студенческого YouTube-канала",
+        "branch":      "media", "grade": 2, "min_level": 5,
+        "min_reward":  85, "max_reward":  130,
+        "min_exp":     85, "max_exp":    130,
+        "description": "У тебя уже есть штатив и кольцевая лампа.",
+        "evolves_to":  "media_3", "req_level": 10,
+        "req_skill":   ("communication_level", 4),
+    },
+    "media_3": {
+        "name":        "📸 Инстаграм-блогер с рекламными интеграциями",
+        "branch":      "media", "grade": 3, "min_level": 10,
+        "min_reward":  200, "max_reward": 310,
+        "min_exp":     200, "max_exp":    310,
+        "description": "Рекламодатели пишут первыми.",
+        "evolves_to":  "media_4", "req_level": 20,
+        "req_skill":   ("management_level", 3),
+        "req_item":    ("has_laptop", "💻 Ноутбук"),
+    },
+    "media_4": {
+        "name":        "🎙 Подкастер с миллионной аудиторией",
+        "branch":      "media", "grade": 4, "min_level": 20,
+        "min_reward":  450, "max_reward": 650,
+        "min_exp":     450, "max_exp":    650,
+        "description": "У тебя студия звукозаписи прямо в квартире.",
+        "evolves_to":  "media_5", "req_level": 35,
+        "req_skill":   ("management_level", 5),
+        "req_item":    ("has_business_plan", "📊 Бизнес-план"),
+    },
+    "media_5": {
+        "name":        "📺 Ведущий национального телешоу",
+        "branch":      "media", "grade": 5, "min_level": 35,
+        "min_reward":  980, "max_reward": 1350,
+        "min_exp":     980, "max_exp":    1350,
+        "description": "Тебя узнают таксисты и продавцы на базаре.",
+        "evolves_to":  "media_6", "req_level": 50,
+        "req_skill":   ("management_level", 7),
+        "req_item":    ("has_dean_seal", "🔏 Декановская печать"),
+    },
+    "media_6": {
+        "name":        "🌐 Основатель медиахолдинга",
+        "branch":      "media", "grade": 6, "min_level": 50,
+        "min_reward":  1950, "max_reward": 2650,
+        "min_exp":     1950, "max_exp":    2650,
+        "description": "У тебя своя сеть каналов и редакция.",
+        "evolves_to":  "media_7", "req_level": 70,
+        "req_skill":   ("management_level", 9),
+        "req_item":    ("has_franchise_contract", "📜 Франшизный контракт"),
+    },
+    "media_7": {
+        "name":        "🎬 Продюсер международных проектов",
+        "branch":      "media", "grade": 7, "min_level": 70,
+        "min_reward":  3500, "max_reward": 4700,
+        "min_exp":     3500, "max_exp":    4700,
+        "description": "Твои проекты показывают за пределами Кыргызстана.",
+        "evolves_to":  "media_8", "req_level": 80,
+        "req_skill":   ("management_level", 10),
+        "req_item":    ("has_logistics_license", "📋 Лицензия логиста"),
+    },
+    "media_8": {
+        "name":        "🏆 Обладатель премии «Золотой микрофон»",
+        "branch":      "media", "grade": 8, "min_level": 80,
+        "min_reward":  5600, "max_reward": 7500,
+        "min_exp":     5600, "max_exp":    7500,
+        "description": "Награда за вклад в медиаиндустрию региона.",
+        "evolves_to":  "media_9", "req_level": 100,
+        "req_skill":   ("management_level", 10),
+        "req_item":    ("has_import_license", "🛃 Импортная лицензия"),
+    },
+    "media_9": {
+        "name":        "👑 Медиамагнат, чьё лицо знает вся Центральная Азия",
+        "branch":      "media", "grade": 9, "min_level": 100,
+        "min_reward":  11000, "max_reward": 16500,
+        "min_exp":     11000, "max_exp":    16500,
+        "description": "Твоё имя — синоним слова «медиа» в регионе.",
+        "evolves_to":  None,
+        "special":     "media_king",
+    },
+# ══════════ ВЕТКА ПОЛИТИКИ (4 перерождение) ══════════
+    "politics_1": {
+        "name":        "🗳 Волонтёр на выборах в студсовет",
+        "branch":      "politics", "grade": 1, "min_level": 1,
+        "min_reward":  40, "max_reward":  65,
+        "min_exp":     40, "max_exp":     65,
+        "description": "Раздаёшь листовки у главного корпуса.",
+        "evolves_to":  "politics_2", "req_level": 5,
+    },
+    "politics_2": {
+        "name":        "📋 Депутат студенческого парламента",
+        "branch":      "politics", "grade": 2, "min_level": 5,
+        "min_reward":  100, "max_reward": 150,
+        "min_exp":     100, "max_exp":    150,
+        "description": "Первая должность на пути к большой политике.",
+        "evolves_to":  "politics_3", "req_level": 10,
+        "req_skill":   ("communication_level", 4),
+    },
+    "politics_3": {
+        "name":        "🏢 Помощник депутата Жогорку Кенеша",
+        "branch":      "politics", "grade": 3, "min_level": 10,
+        "min_reward":  230, "max_reward": 350,
+        "min_exp":     230, "max_exp":    350,
+        "description": "Носишь папки и учишься закулисной игре.",
+        "evolves_to":  "politics_4", "req_level": 20,
+        "req_skill":   ("management_level", 3),
+        "req_item":    ("has_laptop", "💻 Ноутбук"),
+    },
+    "politics_4": {
+        "name":        "🎖 Депутат Жогорку Кенеша",
+        "branch":      "politics", "grade": 4, "min_level": 20,
+        "min_reward":  520, "max_reward": 750,
+        "min_exp":     520, "max_exp":    750,
+        "description": "У тебя своё кресло в парламенте.",
+        "evolves_to":  "politics_5", "req_level": 35,
+        "req_skill":   ("management_level", 5),
+        "req_item":    ("has_business_plan", "📊 Бизнес-план"),
+    },
+    "politics_5": {
+        "name":        "🏛 Министр образования",
+        "branch":      "politics", "grade": 5, "min_level": 35,
+        "min_reward":  1120, "max_reward": 1550,
+        "min_exp":     1120, "max_exp":    1550,
+        "description": "Наконец-то можешь изменить систему изнутри.",
+        "evolves_to":  "politics_6", "req_level": 50,
+        "req_skill":   ("management_level", 7),
+        "req_item":    ("has_dean_seal", "🔏 Декановская печать"),
+    },
+    "politics_6": {
+        "name":        "🕴 Вице-премьер-министр",
+        "branch":      "politics", "grade": 6, "min_level": 50,
+        "min_reward":  2250, "max_reward": 3050,
+        "min_exp":     2250, "max_exp":    3050,
+        "description": "Второй человек в правительстве страны.",
+        "evolves_to":  "politics_7", "req_level": 70,
+        "req_skill":   ("management_level", 9),
+        "req_item":    ("has_franchise_contract", "📜 Франшизный контракт"),
+    },
+    "politics_7": {
+        "name":        "🌍 Полномочный представитель в ООН",
+        "branch":      "politics", "grade": 7, "min_level": 70,
+        "min_reward":  4000, "max_reward": 5400,
+        "min_exp":     4000, "max_exp":    5400,
+        "description": "Твой голос звучит на мировой арене.",
+        "evolves_to":  "politics_8", "req_level": 80,
+        "req_skill":   ("management_level", 10),
+        "req_item":    ("has_logistics_license", "📋 Лицензия логиста"),
+    },
+    "politics_8": {
+        "name":        "🏆 Премьер-министр Кыргызской Республики",
+        "branch":      "politics", "grade": 8, "min_level": 80,
+        "min_reward":  6400, "max_reward": 8600,
+        "min_exp":     6400, "max_exp":    8600,
+        "description": "Управляешь всей страной.",
+        "evolves_to":  "politics_9", "req_level": 100,
+        "req_skill":   ("management_level", 10),
+        "req_item":    ("has_import_license", "🛃 Импортная лицензия"),
+    },
+    "politics_9": {
+        "name":        "👑 Президент Кыргызской Республики",
+        "branch":      "politics", "grade": 9, "min_level": 100,
+        "min_reward":  12500, "max_reward": 19000,
+        "min_exp":     12500, "max_exp":    19000,
+        "description": "Вершина пути. Ты — Президент.",
+        "evolves_to":  None,
+        "special":     "politics_king",
+    },
 }
 
 STARTER_JOB_KEYS = ["intel_1", "balance_1", "money_1"]
 JOB_NAME_TO_KEY = {data["name"]: key for key, data in JOBS.items()}
+
+def get_available_starter_jobs(user: dict) -> list[str]:
+    rebirths = user.get("rebirths", 0)
+    keys = list(STARTER_JOB_KEYS)
+    for req, job_key in REBIRTH_STARTER_JOBS.items():
+        if rebirths >= req:
+            keys.append(job_key)
+    return keys
 
 # =====================================================================
 # СЛУЧАЙНЫЕ СОБЫТИЯ ПРИ РАБОТЕ
@@ -466,6 +840,42 @@ WORK_EVENTS = {
             "⚠️ Санинспектор нагрянул. Штраф и нервы.",
             "⚠️ Просрочка поставки — пришлось выбросить партию.",
             "⚠️ Кофемашина сломалась. Ремонт за свой счёт.",
+        ],
+    },
+"science": {
+        "positive": [
+            "🔥 Статья принята в топовый журнал! Гонорар пришёл сразу.",
+            "🔥 Открытие подтвердилось! Дополнительный грант.",
+            "🔥 Коллаборация с зарубежным вузом принесла бонус.",
+        ],
+        "negative": [
+            "⚠️ Эксперимент провалился. Реагенты испорчены.",
+            "⚠️ Рецензент завернул статью. Придётся переписывать.",
+            "⚠️ Оборудование сломалось посреди опыта.",
+        ],
+    },
+    "media": {
+        "positive": [
+            "🔥 Видео завирусилось! Рекламодатели в очереди.",
+            "🔥 Коллаборация со звездой подняла охваты!",
+            "🔥 Алгоритмы продвинули твой контент в топ.",
+        ],
+        "negative": [
+            "⚠️ Аккаунт временно заблокировали за спам-жалобы.",
+            "⚠️ Скандал в комментариях испортил репутацию.",
+            "⚠️ Рекламодатель отказался от сделки в последний момент.",
+        ],
+    },
+    "politics": {
+        "positive": [
+            "🔥 Закон приняли! Тебя хвалят в новостях.",
+            "🔥 Успешные переговоры принесли бонус к бюджету.",
+            "🔥 Электорат в восторге от твоей речи.",
+        ],
+        "negative": [
+            "⚠️ Оппозиция устроила скандал в парламенте.",
+            "⚠️ Утечка компромата подпортила рейтинг.",
+            "⚠️ Реформа провалилась, пришлось оправдываться.",
         ],
     },
 }
@@ -568,6 +978,160 @@ SHOP_ITEMS = {
         "skill_bonus": ("management_level", 2),
     },
 }
+
+ASCENSION_UPGRADES = {
+    "coin_boost": {
+        "name": "💰 Печать Вознесения (монеты)",
+        "label": "монеты",
+        "base_cost": 10, "cost_growth": 8,   # цена след. уровня = base_cost + level*cost_growth
+        "max_level": 20,
+        "per_level_bonus": 1,   # +1% к монетам за уровень
+        "description": "Перманентный бонус к заработку. Не сбрасывается перерождением.",
+    },
+    "xp_boost": {
+        "name": "✨ Печать Вознесения (опыт)",
+        "label": "опыт",
+        "base_cost": 10, "cost_growth": 8,
+        "max_level": 20,
+        "per_level_bonus": 1,
+        "description": "Перманентный бонус к опыту. Не сбрасывается перерождением.",
+    },
+    "luck_boost": {
+        "name": "🍀 Печать Вознесения (удача)",
+        "label": "удача",
+        "base_cost": 15, "cost_growth": 10,
+        "max_level": 15,
+        "per_level_bonus": 1,
+        "description": "Перманентная удача. Не сбрасывается перерождением.",
+    },
+    "energy_cap": {
+        "name": "🔋 Ядро выносливости",
+        "label": "макс. энергия",
+        "base_cost": 20, "cost_growth": 12,
+        "max_level": 10,
+        "per_level_bonus": 20,   # +20 к максимуму энергии за уровень
+        "description": "Увеличивает максимум энергии перманентно.",
+    },
+    "hp_cap": {
+        "name": "❤️ Ядро жизни",
+        "label": "макс. HP",
+        "base_cost": 20, "cost_growth": 12,
+        "max_level": 10,
+        "per_level_bonus": 20,
+        "description": "Увеличивает максимум здоровья перманентно.",
+    },
+    "start_capital": {
+        "name": "🏦 Наследный капитал",
+        "label": "стартовый баланс",
+        "base_cost": 25, "cost_growth": 15,
+        "max_level": 10,
+        "per_level_bonus": 100,   # +100 к стартовым монетам при перерождении, за уровень
+        "description": "Увеличивает стартовый капитал при каждом перерождении.",
+    },
+}
+
+
+def get_ascension_upgrades(user: dict) -> dict:
+    import json
+    raw = user.get("ascension_upgrades", "") or "{}"
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {}
+
+
+def save_ascension_upgrades(user_id: int, upgrades: dict):
+    import json
+    update_user(user_id, ascension_upgrades=json.dumps(upgrades))
+
+
+def get_ascension_upgrade_cost(cfg: dict, level: int) -> int:
+    return cfg["base_cost"] + level * cfg["cost_growth"]
+
+
+def do_buy_ascension_upgrade(user: dict, key: str) -> tuple[bool, str]:
+    cfg = ASCENSION_UPGRADES.get(key)
+    if not cfg:
+        return False, "❌ Неизвестное улучшение."
+    upgrades = get_ascension_upgrades(user)
+    level = upgrades.get(key, 0)
+    if level >= cfg["max_level"]:
+        return False, f"✅ <b>{cfg['name']}</b> уже прокачано до максимума ({cfg['max_level']} ур.)."
+
+    cost = get_ascension_upgrade_cost(cfg, level)
+    if user.get("ascension_crystals", 0) < cost:
+        return False, f"❌ Нужно <b>{cost}</b> 🌌 кристаллов, есть <b>{user.get('ascension_crystals', 0)}</b>."
+
+    upgrades[key] = level + 1
+    save_ascension_upgrades(user["user_id"], upgrades)
+    update_user(user["user_id"], ascension_crystals=user.get("ascension_crystals", 0) - cost)
+    return True, (
+        f"✅ <b>{cfg['name']}</b> улучшено до уровня <b>{level + 1}</b>!\n"
+        f"🌌 Потрачено: {cost} кристаллов."
+    )
+
+
+def get_ascension_upgrade_bonus(user: dict, key: str) -> int:
+    cfg = ASCENSION_UPGRADES.get(key)
+    if not cfg:
+        return 0
+    level = get_ascension_upgrades(user).get(key, 0)
+    return level * cfg["per_level_bonus"]
+
+
+def build_ascension_shop_text(user: dict) -> str:
+    upgrades = get_ascension_upgrades(user)
+    lines = [
+        "🌌 <b>Алтарь Вознесения</b>\n",
+        f"🌌 Кристаллов: <b>{user.get('ascension_crystals', 0)}</b>\n",
+        "<i>Все улучшения здесь перманентны и НЕ сбрасываются перерождением!</i>\n",
+    ]
+    for key, cfg in ASCENSION_UPGRADES.items():
+        level = upgrades.get(key, 0)
+        if level >= cfg["max_level"]:
+            cost_line = "МАКСИМУМ"
+        else:
+            cost_line = f"{get_ascension_upgrade_cost(cfg, level)} 🌌"
+        current_bonus = level * cfg["per_level_bonus"]
+        lines.append(
+            f"<b>{cfg['name']}</b> — ур. {level}/{cfg['max_level']}\n"
+            f"  <i>{cfg['description']}</i>\n"
+            f"  Текущий бонус: +{current_bonus} к {cfg['label']}\n"
+            f"  Следующий уровень: {cost_line}"
+        )
+    return "\n\n".join(lines)
+
+
+def get_ascension_shop_keyboard(user: dict) -> InlineKeyboardMarkup:
+    upgrades = get_ascension_upgrades(user)
+    builder = InlineKeyboardBuilder()
+    for key, cfg in ASCENSION_UPGRADES.items():
+        level = upgrades.get(key, 0)
+        if level >= cfg["max_level"]:
+            continue
+        cost = get_ascension_upgrade_cost(cfg, level)
+        builder.button(text=f"⬆️ {cfg['name']} ({cost} 🌌)", callback_data=f"asc_upgrade:{key}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+@dp.message(Command("ascension"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in
+                                  ("вознесение", "алтарь", "ascension")))
+async def cmd_ascension_shop(message: Message):
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
+    await message.answer(build_ascension_shop_text(user), reply_markup=get_ascension_shop_keyboard(user))
+
+
+@dp.callback_query(F.data.startswith("asc_upgrade:"))
+async def cb_ascension_upgrade(callback: CallbackQuery):
+    key = callback.data.split(":")[1]
+    user = get_user_safe(callback.from_user.id)
+    success, text = do_buy_ascension_upgrade(user, key)
+    await callback.answer()
+    await callback.message.answer(text)
+    if success:
+        updated = get_user(callback.from_user.id)
+        await callback.message.edit_text(build_ascension_shop_text(updated), reply_markup=get_ascension_shop_keyboard(updated))
 
 CONSUMABLES = {
     "water": {
@@ -1315,6 +1879,14 @@ ACHIEVEMENTS = {
         "name": "✨ Редчайшая находка", "description": "Добудь легендарный ресурс (алмаз, золотая рыбка или шкура барса)",
         "reward_coins": 1500, "reward_exp": 500
     },
+    "first_rebirth": {
+        "name": "🔄 Новый цикл", "description": "Соверши первое перерождение",
+        "reward_coins": 1000, "reward_exp": 500,
+    },
+    "rebirth_5": {
+        "name": "🌀 Ветеран перерождений", "description": "Переродись 5 раз",
+        "reward_coins": 10000, "reward_exp": 3000,
+    },
 }
 
 RELATIONSHIP_LEVELS = [
@@ -1977,6 +2549,30 @@ TITLES = {
         "description": "Победи всех боссов локаций.",
         "condition": lambda u: all(k in get_location_boss_cooldowns(u) for k in LOCATION_BOSSES),
     },
+    "founder_legend": {
+        "name": "🏛 Отец-Основатель", "admin_only": False,
+        "bonus_coins": 10, "bonus_xp": 10, "bonus_luck": 5,
+        "description": "Достигни 9 грейда ветки Основателя.",
+        "condition": lambda u: get_job(u) is not None and get_job(u)["branch"] == "founder" and get_job(u)["grade"] == 9,
+    },
+    "science_legend": {
+        "name": "🧠 Нобелевский лауреат", "admin_only": False,
+        "bonus_coins": 8, "bonus_xp": 15, "bonus_luck": 5,
+        "description": "Достигни 9 грейда ветки Науки.",
+        "condition": lambda u: get_job(u) is not None and get_job(u)["branch"] == "science" and get_job(u)["grade"] == 9,
+    },
+    "media_legend": {
+        "name": "📺 Медиамагнат", "admin_only": False,
+        "bonus_coins": 15, "bonus_xp": 8, "bonus_luck": 5,
+        "description": "Достигни 9 грейда ветки Медиа.",
+        "condition": lambda u: get_job(u) is not None and get_job(u)["branch"] == "media" and get_job(u)["grade"] == 9,
+    },
+    "politics_legend": {
+        "name": "👑 Президент", "admin_only": False,
+        "bonus_coins": 12, "bonus_xp": 12, "bonus_luck": 10,
+        "description": "Достигни 9 грейда ветки Политики.",
+        "condition": lambda u: get_job(u) is not None and get_job(u)["branch"] == "politics" and get_job(u)["grade"] == 9,
+    },
 }
 
 
@@ -2080,6 +2676,9 @@ def check_and_grant_achievements(user: dict) -> list[str]:
     tools_owned = get_tools(user)
     gather_total = _sum_resources(user)
     loc_cds = get_location_boss_cooldowns(user)
+
+    _try("first_rebirth", user.get("rebirths", 0) >= 1)
+    _try("rebirth_5", user.get("rebirths", 0) >= 5)
 
     _try("first_hunt", user.get("stat_hunt_count", 0) >= 1)
     _try("first_fish", user.get("stat_fish_count", 0) >= 1)
@@ -2304,6 +2903,11 @@ def init_db():
                 ("stat_fish_count", "INTEGER DEFAULT 0"),
                 ("stat_mine_count", "INTEGER DEFAULT 0"),
                 ("stat_location_boss_kills", "INTEGER DEFAULT 0"),
+                ("rebirths", "INTEGER DEFAULT 0"),
+                ("ascension_crystals", "INTEGER DEFAULT 0"),
+                ("ascension_upgrades", "TEXT DEFAULT '{}'"),
+                ("ascension_items", "TEXT DEFAULT '{}'"),
+                ("equipped_ascension_item", "TEXT DEFAULT ''"),
             ]:
                 try:
                     with get_conn() as conn:  # <-- отдельное соединение на каждый ALTER
@@ -2349,10 +2953,10 @@ def update_user(user_id: int, **kwargs):
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # =====================================================================
 def get_max_hp(user: dict) -> int:
-    return 100 + user["endurance"] * 10
+    return 100 + user["endurance"] * 10 + get_ascension_upgrade_bonus(user, "hp_cap")
 
 def get_max_energy(user: dict) -> int:
-    return 100 + user["intellect"] * 10
+    return 100 + user["intellect"] * 10 + get_ascension_upgrade_bonus(user, "energy_cap")
 
 # === Система "слабости" при низком HP ===
 INCAPACITATED_HP_PCT = 5  # если HP < 5% от макс. — действия недоступны
@@ -2518,7 +3122,7 @@ def build_jobs_text(user: dict) -> str:
     if user["job"] == "Безработный":
         lines = ["💼 <b>Выбор профессии</b>\n",
                  "Выбери ветку — сменить нельзя!\n"]
-        for key in STARTER_JOB_KEYS:
+        for key in get_available_starter_jobs(user):
             d = JOBS[key]
             lines.append(
                 f"🔹 <b>{d['name']}</b>\n"
@@ -2526,13 +3130,17 @@ def build_jobs_text(user: dict) -> str:
                 f"✨ {d['min_exp']}–{d['max_exp']} XP\n"
                 f"   <i>{d['description']}</i>"
             )
+        rebirths = user.get("rebirths", 0)
+        for req, job_key in sorted(REBIRTH_STARTER_JOBS.items()):
+            if req > rebirths:
+                lines.append(f"🔒 «???» — открывается после {req} перерождения(ий)")
         return "\n".join(lines)
 
     job_key = get_job_key(user)
     if not job_key:
         update_user(user["user_id"], job="Безработный")
         lines = ["⚠️ <b>Профессия сброшена</b> из-за обновления игры. Выбери заново:\n"]
-        for key in STARTER_JOB_KEYS:
+        for key in get_available_starter_jobs(user):
             d = JOBS[key]
             lines.append(
                 f"🔹 <b>{d['name']}</b>\n"
@@ -2585,7 +3193,7 @@ def get_jobs_keyboard(user: dict) -> InlineKeyboardMarkup | None:
     builder = InlineKeyboardBuilder()
 
     if user["job"] == "Безработный":
-        for key in STARTER_JOB_KEYS:
+        for key in get_available_starter_jobs(user):
             builder.button(
                 text=JOBS[key]["name"][:50],
                 callback_data=JobCallback(job_key=key).pack()
@@ -2596,7 +3204,7 @@ def get_jobs_keyboard(user: dict) -> InlineKeyboardMarkup | None:
     job_key = get_job_key(user)
     if not job_key:
         update_user(user["user_id"], job="Безработный")
-        for key in STARTER_JOB_KEYS:
+        for key in get_available_starter_jobs(user):
             builder.button(
                 text=JOBS[key]["name"][:50],
                 callback_data=JobCallback(job_key=key).pack()
@@ -3095,11 +3703,15 @@ def build_profile_text(user: dict, mention: str) -> str:
         + (f"  [Грейд {grade}/9, Ранг {rank}]" if grade > 0 else "") + "\n"
         f"{title_line}"                                                               
         f"⭐ Уровень: <b>{lvl}</b>\n"
-        f"⭐ Репутация:     <b>{rep}</b> ({rep_title})\n" 
+        f"⭐ Репутация:     <b>{rep}</b> ({rep_title})\n"
+        f"🔄 Перерождений: <b>{user.get('rebirths', 0)}</b> "
+        f"(бонус: +{user.get('rebirths', 0) * REBIRTH_COIN_BONUS_PER}% монет, "
+        f"+{user.get('rebirths', 0) * REBIRTH_XP_BONUS_PER}% опыта)\n"                                                               
         f"{spouse_line}"                                                               
         f"✨ Опыт: <b>{user['exp']}</b> / {needed_xp}\n"
-        f"💰 Баланс: <b>{user['balance']}</b> монет\n\n"
-        f"🔶 Осколки: <b>{user.get('shards', 0)}</b>\n\n"                                                               
+        f"💰 Баланс: <b>{user['balance']}</b> монет\n"
+        f"🔶 Осколки: <b>{user.get('shards', 0)}</b>\n"
+        f"🌌 Кристаллы Вознесения: <b>{user.get('ascension_crystals', 0)}</b>\n\n"                                                               
         f"━━━ 💗 Ресурсы ━━━\n"
         f"❤️ Здоровье:  <b>{user['hp']}</b> / {max_hp}\n"
         f"⚡ Энергия:   <b>{user['energy']}</b> / {max_energy}\n"
@@ -4036,6 +4648,9 @@ HELP_CATEGORIES = {
             "<b>реферал</b> / <b>пригласить</b> / /ref — своя пригласительная ссылка\n"
             f"  Тебе: +{REFERRAL_BONUS_COINS_REFERRER} монет, +{REFERRAL_BONUS_EXP_REFERRER} XP за друга\n"
             f"  Другу: +{REFERRAL_BONUS_COINS_NEWBIE} монет, +{REFERRAL_BONUS_EXP_NEWBIE} XP"
+            f"🌌 <b>Вознесение</b>"
+            f"<b>вознесение</b> / <b>алтарь</b> — магазин перманентных улучшений за кристаллы"
+            f"<b>вознесение</b> / <b>алтарь</b> — магазин перманентных улучшений за кристаллы"
         ),
     },
     "bosses": {
@@ -5414,8 +6029,8 @@ async def callback_choose_job(callback: CallbackQuery, callback_data: JobCallbac
     if user["job"] != "Безработный":
         await callback.answer("⛔ Ты уже выбрал профессию!", show_alert=True)
         return
-    if job_key not in STARTER_JOB_KEYS:
-        await callback.answer("❌ Нельзя начать с этой профессии.", show_alert=True)
+    if job_key not in get_available_starter_jobs(user):
+        await callback.answer("❌ Эта профессия ещё не открыта.", show_alert=True)
         return
 
     update_user(user_id, job=job["name"])
@@ -6322,9 +6937,9 @@ ADMIN_HELP_CATEGORIES = {
             "📢 <b>Рассылка</b>\n"
             "<code>объявление текст</code> — рассылка текста всем\n"
             "<code>объявление</code> (ответом на сообщение) — рассылка копии "
-            "(фото/видео/текст)"
-            "<code>/server_stats -статистика сервера\n"
-            "<code>/give_all - дать всем деньги, опыт\n"
+            "(фото/видео/текст)\n\n"
+            "<code>/server_stats</code> — статистика сервера\n"
+            "<code>/give_all coins/exp сумма</code> — начислить всем игрокам монеты/опыт"
         ),
     },
 }
@@ -7439,16 +8054,25 @@ def get_equipped_item_bonus(user: dict) -> tuple[int, int, int]:
     return 0, 0, 0
 
 
+def get_rebirth_bonus(user: dict) -> tuple[int, int]:
+    r = user.get("rebirths", 0)
+    return r * REBIRTH_COIN_BONUS_PER, r * REBIRTH_XP_BONUS_PER
+
+
 def get_combined_bonus(user: dict) -> tuple[int, int, int]:
-    """Суммарный бонус: питомец + титул + брак + экипированный предмет с босса."""
     pet_coins, pet_xp, pet_luck = get_pet_bonus(user)
     title_coins, title_xp, title_luck = get_title_bonus(user)
     marriage_coins, marriage_xp = get_marriage_bonus(user)
     item_coins, item_xp, item_luck = get_equipped_item_bonus(user)
+    rebirth_coins, rebirth_xp = get_rebirth_bonus(user)
+    asc_coins = get_ascension_upgrade_bonus(user, "coin_boost")
+    asc_xp    = get_ascension_upgrade_bonus(user, "xp_boost")
+    asc_luck  = get_ascension_upgrade_bonus(user, "luck_boost")
+    asc_item_coins, asc_item_xp, asc_item_luck = get_equipped_ascension_item_bonus(user)
     return (
-        pet_coins + title_coins + marriage_coins + item_coins,
-        pet_xp + title_xp + marriage_xp + item_xp,
-        pet_luck + title_luck + item_luck,
+        pet_coins + title_coins + marriage_coins + item_coins + rebirth_coins + asc_coins + asc_item_coins,
+        pet_xp + title_xp + marriage_xp + item_xp + rebirth_xp + asc_xp + asc_item_xp,
+        pet_luck + title_luck + item_luck + asc_luck + asc_item_luck,
     )
 
 
@@ -8964,6 +9588,8 @@ def do_fight_boss(user: dict, boss_key: str) -> tuple[bool, str]:
     shards = random.randint(boss["reward_shards_min"], boss["reward_shards_max"])
     shards = int(shards * (1 + boss_bonus / 100))
     new_shards = user.get("shards", 0) + shards
+    if random.random() < 0.15:  # 15% шанс капнуть кристалл с обычного босса
+        update_user(user["user_id"], ascension_crystals=user.get("ascension_crystals", 0) + 1)
     update_user(user["user_id"], shards=new_shards)
     bump_stat(user["user_id"], "stat_boss_kills")
     change_reputation(user["user_id"], +2)
@@ -10193,6 +10819,335 @@ async def btn_gathering_menu(message: Message):
         "<b>трофеи локаций</b> — трофеи с боссов локаций"
     )
 
+RESET_ON_REBIRTH = {
+    "level": 1, "exp": 0,
+    "job": "Безработный", "job_rank": 1,
+    "agility": 1, "endurance": 1, "charisma": 1, "intellect": 1,
+    "communication_level": 1, "driving_level": 0, "service_level": 0,
+    "organization_level": 0, "management_level": 0,
+    "has_scooter": 0, "has_shaker": 0, "has_laptop": 0,
+    "has_professor_badge": 0, "has_logistics_license": 0,
+    "has_import_license": 0, "has_dean_seal": 0,
+    "has_business_plan": 0, "has_franchise_contract": 0,
+    "has_psychology_book": 0, "has_driving_license": 0, "has_suit": 0,
+    "hp": 100, "energy": 100,
+    "last_work_time": 0, "last_regen_time": 0,
+    "reputation": 0,
+    "properties": "{}", "last_income_collect": 0,
+    "last_daily_claim": 0, "daily_streak": 0,
+    "shards": 0, "boss_items": "{}", "equipped_boss_item": "", "boss_cooldowns": "{}",
+    "hunting_level": 0, "fishing_level": 0, "mining_level": 0,
+    "last_hunt_time": 0, "last_fish_time": 0, "last_mine_time": 0,
+    "resources": "{}", "tools": "{}",
+    "equipped_tool_mining": "", "equipped_tool_fishing": "", "equipped_tool_hunting": "",
+    "location_items": "{}", "equipped_location_item": "", "location_boss_cooldowns": "{}",
+}
+# Важно: pet_collection, active_pet, titles, active_title, achievements
+# сюда НЕ входят — они сохраняются.
+
+
+def get_rebirth_status(user: dict) -> tuple[bool, str]:
+    if user["level"] < REBIRTH_MIN_LEVEL:
+        return False, (
+            f"❌ Нужен <b>{REBIRTH_MIN_LEVEL}</b> уровень для перерождения "
+            f"(у тебя {user['level']})."
+        )
+    return True, "✅ Готов к перерождению!"
+
+
+def do_rebirth(user: dict) -> tuple[bool, str]:
+    can, why = get_rebirth_status(user)
+    if not can:
+        return False, why
+
+    old_rebirths = user.get("rebirths", 0)
+    new_rebirths = old_rebirths + 1
+    new_luck     = random.randint(1, 10)
+    start_bonus = (REBIRTH_START_COINS + old_rebirths * REBIRTH_START_COINS_PER
+                   + get_ascension_upgrade_bonus(user, "start_capital"))
+    crystals_earned = ASCENSION_CRYSTALS_BASE + old_rebirths * ASCENSION_CRYSTALS_PER
+    new_crystals = user.get("ascension_crystals", 0) + crystals_earned
+
+    reset_fields = dict(RESET_ON_REBIRTH)
+    reset_fields["luck"]     = new_luck
+    reset_fields["rebirths"] = new_rebirths
+    reset_fields["balance"]  = start_bonus
+    reset_fields["ascension_crystals"] = new_crystals
+
+    spouse_id = user.get("spouse_id")
+    if spouse_id:
+        update_user(spouse_id, spouse_id=None, married_at=0)
+        reset_fields["spouse_id"]  = None
+        reset_fields["married_at"] = 0
+
+    update_user(user["user_id"], **reset_fields)
+
+    unlocked_line = ""
+    if new_rebirths in REBIRTH_STARTER_JOBS:
+        job_key = REBIRTH_STARTER_JOBS[new_rebirths]
+        unlocked_line = (
+            f"\n\n🔓 <b>Открыта новая ветка профессий!</b>\n"
+            f"«{JOBS[job_key]['name']}» теперь доступна при выборе профессии."
+        )
+
+    coin_bonus = new_rebirths * REBIRTH_COIN_BONUS_PER
+    xp_bonus   = new_rebirths * REBIRTH_XP_BONUS_PER
+
+    updated = get_user(user["user_id"])
+    if updated:
+        check_and_grant_achievements(updated)
+        check_and_grant_titles(updated)
+
+    return True, (
+        f"✨ <b>ПЕРЕРОЖДЕНИЕ!</b> ✨\n\n"
+        f"🔄 Ты переродился <b>{new_rebirths}</b> раз(а)!\n"
+        f"📉 Уровень, опыт, баланс, характеристики, навыки, снаряжение, "
+        f"недвижимость, репутация и прогресс промыслов сброшены.\n"
+        f"🐾 Питомцы, 🎖 титулы и 🏅 достижения — сохранены!\n\n"
+        f"💰 Стартовый капитал: <b>{start_bonus}</b> монет\n"
+        f"🌌 Получено кристаллов Вознесения: <b>+{crystals_earned}</b> (всего: {new_crystals})\n"
+        f"📈 Постоянный бонус: <b>+{coin_bonus}%</b> монет, <b>+{xp_bonus}%</b> опыта\n"
+        f"🍀 Новая удача: <b>{new_luck}</b>"
+        f"{unlocked_line}"
+    )
+
+@dp.message(Command("rebirth"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in
+                                  ("переродиться", "перерождение", "rebirth")))
+async def cmd_rebirth(message: Message):
+    user      = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
+    can, why  = get_rebirth_status(user)
+    rebirths  = user.get("rebirths", 0)
+    coin_bonus = rebirths * REBIRTH_COIN_BONUS_PER
+    xp_bonus   = rebirths * REBIRTH_XP_BONUS_PER
+
+    lines = [
+        "🔄 <b>Перерождение</b>\n",
+        f"Ты перерождался: <b>{rebirths}</b> раз(а)",
+        f"Текущий бонус: +{coin_bonus}% монет, +{xp_bonus}% опыта\n",
+        f"📌 Условие: уровень <b>{REBIRTH_MIN_LEVEL}</b>+ (у тебя {user['level']})\n",
+        "⚠️ При перерождении сбрасываются: уровень, опыт, баланс, характеристики, "
+        "навыки, снаряжение, недвижимость, репутация, промыслы и профессия.",
+        "✅ Сохраняются: 🐾 питомцы, 🎖 титулы, 🏅 достижения.\n",
+    ]
+
+    if REBIRTH_STARTER_JOBS:
+        lines.append("🔓 <b>Ветки, открываемые перерождениями:</b>")
+        for req, job_key in sorted(REBIRTH_STARTER_JOBS.items()):
+            mark = "✅" if rebirths >= req else "🔒"
+            lines.append(f"  {mark} {req} перер. — «{JOBS[job_key]['name']}»")
+
+    text = "\n".join(lines)
+
+    if can:
+        builder = InlineKeyboardBuilder()
+        builder.button(text="✨ Переродиться!", callback_data="rebirth_confirm")
+        await message.answer(text, reply_markup=builder.as_markup())
+    else:
+        await message.answer(text + f"\n\n{why}")
+
+
+@dp.callback_query(F.data == "rebirth_confirm")
+async def cb_rebirth_confirm(callback: CallbackQuery):
+    user = get_user_safe(callback.from_user.id)
+    await callback.answer()
+    success, text = do_rebirth(user)
+    await callback.message.edit_text(text)
+
+ASCENSION_ITEMS = {
+    "shard_of_time": {
+        "name": "⏳ Осколок Времени", "rarity": "rare", "rarity_label": "🔵 Редкий",
+        "bonus_type": "xp", "base_bonus": 8,
+        "description": "Замедляет время вокруг тебя, ускоряя обучение.",
+        "weight": 35,
+    },
+    "coin_of_eternity": {
+        "name": "🪙 Монета Вечности", "rarity": "rare", "rarity_label": "🔵 Редкий",
+        "bonus_type": "coins", "base_bonus": 8,
+        "description": "Никогда не тускнеет и не заканчивается.",
+        "weight": 35,
+    },
+    "eye_of_fate": {
+        "name": "👁 Око Судьбы", "rarity": "epic", "rarity_label": "🟣 Эпик",
+        "bonus_type": "luck", "base_bonus": 14,
+        "description": "Видит все возможные исходы одновременно.",
+        "weight": 18,
+    },
+    "heart_of_star": {
+        "name": "⭐ Сердце Звезды", "rarity": "epic", "rarity_label": "🟣 Эпик",
+        "bonus_type": "both", "base_bonus": 12,
+        "description": "Осколок погасшей сверхновой.",
+        "weight": 15,
+    },
+    "crown_of_ascension": {
+        "name": "👑 Корона Вознесения", "rarity": "legendary", "rarity_label": "🟡 Легендарный",
+        "bonus_type": "both", "base_bonus": 25,
+        "description": "Носят только те, кто прошёл цикл перерождений много раз.",
+        "weight": 4,
+    },
+    "core_of_infinity": {
+        "name": "♾ Ядро Бесконечности", "rarity": "legendary", "rarity_label": "🟡 Легендарный",
+        "bonus_type": "both", "base_bonus": 30,
+        "description": "Абсолютный артефакт цикла перерождений.",
+        "weight": 2,
+    },
+}
+ASCENSION_RARITY_WEIGHTS_SUM = sum(v["weight"] for v in ASCENSION_ITEMS.values())
+
+
+def get_ascension_items(user: dict) -> dict:
+    import json
+    raw = user.get("ascension_items", "") or "{}"
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {}
+
+
+def save_ascension_items(user_id: int, items: dict):
+    import json
+    update_user(user_id, ascension_items=json.dumps(items))
+
+
+def ascension_gacha_pull(user: dict) -> tuple[str, dict, bool]:
+    keys = list(ASCENSION_ITEMS.keys())
+    weights = [ASCENSION_ITEMS[k]["weight"] for k in keys]
+    chosen_key = random.choices(keys, weights=weights, k=1)[0]
+    chosen = ASCENSION_ITEMS[chosen_key]
+
+    items = get_ascension_items(user)
+    is_dup = chosen_key in items
+    if is_dup:
+        items[chosen_key] += 1
+    else:
+        items[chosen_key] = 1
+        if not user.get("equipped_ascension_item"):
+            update_user(user["user_id"], equipped_ascension_item=chosen_key)
+    save_ascension_items(user["user_id"], items)
+    return chosen_key, chosen, is_dup
+
+
+def get_equipped_ascension_item_bonus(user: dict) -> tuple[int, int, int]:
+    key = user.get("equipped_ascension_item", "")
+    if not key or key not in ASCENSION_ITEMS:
+        return 0, 0, 0
+    item = ASCENSION_ITEMS[key]
+    level = get_ascension_items(user).get(key, 1)
+    bonus = item["base_bonus"] + (level - 1) * 2   # +2 за каждый дубликат
+
+    if item["bonus_type"] == "coins":
+        return bonus, 0, 0
+    elif item["bonus_type"] == "xp":
+        return 0, bonus, 0
+    elif item["bonus_type"] == "luck":
+        return 0, 0, bonus
+    elif item["bonus_type"] == "both":
+        return bonus, bonus, 0
+    return 0, 0, 0
+
+
+def build_ascension_gacha_text(user: dict) -> str:
+    items = get_ascension_items(user)
+    equipped = user.get("equipped_ascension_item", "")
+    lines = [
+        "🌌 <b>Гача Вознесения</b>\n",
+        f"🌌 Кристаллов: <b>{user.get('ascension_crystals', 0)}</b>",
+        f"💠 Цена крутки: <b>{ASCENSION_GACHA_PRICE}</b> кристаллов\n",
+    ]
+    if equipped and equipped in ASCENSION_ITEMS:
+        it = ASCENSION_ITEMS[equipped]
+        lvl = items.get(equipped, 1)
+        lines.append(f"🔧 Экипирован: <b>{it['name']}</b> {it['rarity_label']} (ур. {lvl})\n")
+    else:
+        lines.append("🔧 Артефакт не экипирован.\n")
+    lines.append("<i>Артефакты и кристаллы НЕ сбрасываются перерождением!</i>")
+    return "\n".join(lines)
+
+
+def get_ascension_gacha_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text=f"🌌 Крутить ({ASCENSION_GACHA_PRICE} 🌌)", callback_data="asc_gacha_pull")
+    builder.button(text="📦 Мои артефакты", callback_data="asc_gacha_collection")
+    builder.adjust(1)
+    return builder.as_markup()
+
+@dp.message(Command("asc_gacha"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in
+                                  ("гача вознесения", "гача кристаллов")))
+async def cmd_ascension_gacha(message: Message):
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
+    await message.answer(build_ascension_gacha_text(user), reply_markup=get_ascension_gacha_keyboard())
+
+
+@dp.callback_query(F.data == "asc_gacha_pull")
+async def cb_ascension_gacha_pull(callback: CallbackQuery):
+    user = get_user_safe(callback.from_user.id)
+    if user.get("ascension_crystals", 0) < ASCENSION_GACHA_PRICE:
+        await callback.answer(
+            f"❌ Нужно {ASCENSION_GACHA_PRICE} кристаллов, есть {user.get('ascension_crystals', 0)}",
+            show_alert=True
+        )
+        return
+
+    update_user(callback.from_user.id, ascension_crystals=user["ascension_crystals"] - ASCENSION_GACHA_PRICE)
+    key, item, is_dup = ascension_gacha_pull(user)
+    updated = get_user(callback.from_user.id)
+    level = get_ascension_items(updated).get(key, 1)
+
+    await callback.answer()
+    if is_dup:
+        text = (
+            f"🌌 Крутка!\n\n"
+            f"🔄 Дубликат: <b>{item['name']}</b> {item['rarity_label']}\n"
+            f"Уровень вырос до <b>{level}</b>!\n\n"
+            f"🌌 Осталось кристаллов: <b>{updated['ascension_crystals']}</b>"
+        )
+    else:
+        text = (
+            f"🌌 Крутка!\n\n"
+            f"🎉 <b>НОВЫЙ АРТЕФАКТ!</b>\n{item['name']} {item['rarity_label']}\n"
+            f"<i>{item['description']}</i>\n\n"
+            f"🌌 Осталось кристаллов: <b>{updated['ascension_crystals']}</b>"
+        )
+    await callback.message.answer(text)
+
+
+@dp.callback_query(F.data == "asc_gacha_collection")
+async def cb_ascension_collection(callback: CallbackQuery):
+    user = get_user_safe(callback.from_user.id)
+    items = get_ascension_items(user)
+    equipped = user.get("equipped_ascension_item", "")
+
+    if not items:
+        await callback.answer()
+        await callback.message.answer("📦 У тебя пока нет артефактов Вознесения.")
+        return
+
+    lines = ["📦 <b>Артефакты Вознесения</b>\n"]
+    builder = InlineKeyboardBuilder()
+    for key, level in items.items():
+        if key not in ASCENSION_ITEMS:
+            continue
+        it = ASCENSION_ITEMS[key]
+        mark = " ◀ экипирован" if key == equipped else ""
+        lines.append(f"{'✅' if key == equipped else '•'} {it['name']} {it['rarity_label']}{mark} (ур. {level})")
+        builder.button(text=f"🔧 {it['name'][:20]}", callback_data=f"asc_equip:{key}")
+    builder.adjust(1)
+
+    await callback.answer()
+    await callback.message.answer("\n\n".join(lines), reply_markup=builder.as_markup())
+
+
+@dp.callback_query(F.data.startswith("asc_equip:"))
+async def cb_ascension_equip(callback: CallbackQuery):
+    key = callback.data.split(":")[1]
+    user = get_user_safe(callback.from_user.id)
+    items = get_ascension_items(user)
+    if key not in items:
+        await callback.answer("У тебя нет этого артефакта!", show_alert=True)
+        return
+    update_user(callback.from_user.id, equipped_ascension_item=key)
+    await callback.answer(f"✅ Экипирован: {ASCENSION_ITEMS[key]['name']}!", show_alert=True)
 
 # =====================================================================
 # ТОЧКА ВХОДА
