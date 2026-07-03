@@ -1437,6 +1437,166 @@ BOSS_ITEMS = {
 
 RARITY_ORDER = ["common", "rare", "epic", "legendary"]
 
+VEHICLES = {
+    "bicycle": {
+        "name": "🚲 Велосипед активиста",
+        "price": 8000, "xp_per_hour": 30, "min_level": 40,
+        "description": "Катаешься между корпусами и незаметно набираешься опыта.",
+    },
+    "moped": {
+        "name": "🛵 Мопед курьера",
+        "price": 20000, "xp_per_hour": 70, "min_level": 45,
+        "description": "Развозишь заказы и попутно учишься на ходу.",
+    },
+    "sedan": {
+        "name": "🚗 Подержанный седан",
+        "price": 45000, "xp_per_hour": 150, "min_level": 55,
+        "description": "Слушаешь аудиокниги по дороге на пары.",
+    },
+    "suv": {
+        "name": "🚙 Внедорожник",
+        "price": 90000, "xp_per_hour": 300, "min_level": 65,
+        "description": "Возишь профессоров на конференции — знания сами липнут.",
+    },
+    "sportscar": {
+        "name": "🏎 Спорткар",
+        "price": 200000, "xp_per_hour": 600, "min_level": 80,
+        "description": "Статус привлекает нужных людей и нужные знания.",
+    },
+    "private_jet": {
+        "name": "✈️ Личный самолёт",
+        "price": 500000, "xp_per_hour": 1200, "min_level": 100,
+        "description": "Летаешь на конференции по всему миру.",
+    },
+}
+VEHICLE_XP_CAP_HOURS = 12
+
+def get_user_vehicles(user: dict) -> dict:
+    import json
+    raw = user.get("vehicles", "") or "{}"
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {}
+
+def save_user_vehicles(user_id: int, vehicles: dict):
+    import json
+    update_user(user_id, vehicles=json.dumps(vehicles))
+
+def get_total_xp_per_hour(user: dict) -> int:
+    v = get_user_vehicles(user)
+    return sum(VEHICLES[k]["xp_per_hour"] for k in v if k in VEHICLES)
+
+def build_vehicles_text(user: dict) -> str:
+    v = get_user_vehicles(user)
+    total = get_total_xp_per_hour(user)
+    now = int(time.time())
+    last = user.get("last_xp_collect", 0) or now
+    elapsed_h = min((now - last) / 3600, VEHICLE_XP_CAP_HOURS)
+    pending = apply_combined_xp_bonus(user, int(total * elapsed_h))
+
+    lines = [
+        "🚗 <b>Гараж — пассивный опыт (40+ ур.)</b>\n",
+        f"✨ Опыта в час: <b>{total}</b>",
+        f"📦 Накоплено к сбору: <b>{pending}</b> (макс. {VEHICLE_XP_CAP_HOURS}ч)\n",
+    ]
+    if not v:
+        lines.append("Транспорта пока нет.\n")
+    else:
+        lines.append("<b>Твой транспорт:</b>")
+        for k in v:
+            if k in VEHICLES:
+                lines.append(f"  • {VEHICLES[k]['name']} — {VEHICLES[k]['xp_per_hour']} XP/ч")
+        lines.append("")
+
+    lines.append("<b>Доступно для покупки:</b>")
+    for k, veh in VEHICLES.items():
+        if k in v:
+            continue
+        lock = "" if user["level"] >= veh["min_level"] else f" 🔒 (нужен {veh['min_level']} ур.)"
+        lines.append(
+            f"  • {veh['name']} — {veh['price']} мон., {veh['xp_per_hour']} XP/ч{lock}\n"
+            f"    <i>{veh['description']}</i>"
+        )
+    return "\n".join(lines)
+
+def get_vehicles_keyboard(user: dict) -> InlineKeyboardMarkup:
+    v = get_user_vehicles(user)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✨ Собрать опыт", callback_data="xp_collect")
+    for k, veh in VEHICLES.items():
+        if k in v or user["level"] < veh["min_level"]:
+            continue
+        builder.button(text=f"🛒 {veh['name']} — {veh['price']} мон.", callback_data=f"vehicle_buy:{k}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def do_buy_vehicle(user: dict, key: str) -> tuple[bool, str]:
+    veh = VEHICLES.get(key)
+    if not veh:
+        return False, "❌ Такого транспорта нет."
+    v = get_user_vehicles(user)
+    if key in v:
+        return False, "У тебя уже есть этот транспорт!"
+    if user["level"] < veh["min_level"]:
+        return False, f"❌ Нужен уровень <b>{veh['min_level']}</b>."
+    _, _, _, ev_discount = get_event_multipliers()
+    price = int(veh["price"] * (1 - ev_discount / 100))
+    if user["balance"] < price:
+        return False, f"❌ Недостаточно монет. Нужно {price}."
+    v[key] = int(time.time())
+    save_user_vehicles(user["user_id"], v)
+    last = user.get("last_xp_collect", 0) or int(time.time())
+    update_user(user["user_id"], balance=user["balance"] - price, last_xp_collect=last or int(time.time()))
+    return True, f"✅ Куплено: {veh['name']}!\n💰 Потрачено: {price} монет."
+
+def do_collect_vehicle_xp(user: dict) -> tuple[bool, str]:
+    total = get_total_xp_per_hour(user)
+    if total == 0:
+        return False, "❌ У тебя нет транспорта, дающего опыт."
+    now = int(time.time())
+    last = user.get("last_xp_collect", 0) or now
+    elapsed_h = min((now - last) / 3600, VEHICLE_XP_CAP_HOURS)
+    pending = apply_combined_xp_bonus(user, int(total * elapsed_h))
+    if pending <= 0:
+        return False, "⏳ Пока нечего собирать."
+    new_exp = user["exp"] + pending
+    update_user(user["user_id"], exp=new_exp, last_xp_collect=now)
+    user = {**user, "exp": new_exp}
+    user, level_msgs = auto_level_up(user)
+    level_block = "".join(level_msgs)
+    return True, f"✨ Собрано опыта: <b>+{pending}</b>!{level_block}"
+
+@dp.message(Command("vehicles"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("транспорт","авто", "гараж", "vehicles")))
+async def cmd_vehicles(message: Message):
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
+    if user["level"] < 40:
+        await message.answer("🔒 Гараж открывается с <b>40</b> уровня.")
+        return
+    await message.answer(build_vehicles_text(user), reply_markup=get_vehicles_keyboard(user))
+
+@dp.callback_query(F.data == "xp_collect")
+async def cb_xp_collect(callback: CallbackQuery):
+    user = get_user_safe(callback.from_user.id)
+    success, text = do_collect_vehicle_xp(user)
+    await callback.answer()
+    await callback.message.answer(text)
+    if success:
+        updated = get_user(callback.from_user.id)
+        await callback.message.edit_text(build_vehicles_text(updated), reply_markup=get_vehicles_keyboard(updated))
+
+@dp.callback_query(F.data.startswith("vehicle_buy:"))
+async def cb_vehicle_buy(callback: CallbackQuery):
+    key = callback.data.split(":")[1]
+    user = get_user_safe(callback.from_user.id)
+    success, text = do_buy_vehicle(user, key)
+    await callback.answer()
+    await callback.message.answer(text)
+    if success:
+        updated = get_user(callback.from_user.id)
+        await callback.message.edit_text(build_vehicles_text(updated), reply_markup=get_vehicles_keyboard(updated))
+
 # =====================================================================
 # НЕДВИЖИМОСТЬ / ПАССИВНЫЙ ДОХОД
 # =====================================================================
@@ -1886,6 +2046,22 @@ ACHIEVEMENTS = {
     "rebirth_5": {
         "name": "🌀 Ветеран перерождений", "description": "Переродись 5 раз",
         "reward_coins": 10000, "reward_exp": 3000,
+    },
+    "gather_collection_hunting": {
+        "name": "🏹 Полная коллекция охоты", "description": "Собери хотя бы по 1 каждому ресурсу охоты",
+        "reward_coins": 1500, "reward_exp": 500,
+    },
+    "gather_collection_fishing": {
+        "name": "🎣 Полная коллекция рыбалки", "description": "Собери хотя бы по 1 каждому ресурсу рыбалки",
+        "reward_coins": 1500, "reward_exp": 500,
+    },
+    "gather_collection_mining": {
+        "name": "⛏ Полная коллекция шахты", "description": "Собери хотя бы по 1 каждому ресурсу шахты",
+        "reward_coins": 1500, "reward_exp": 500,
+    },
+    "craft_all_max": {
+        "name": "🌌 Оружейник легенд", "description": "Прокачай все инструменты до максимального уровня",
+        "reward_coins": 15000, "reward_exp": 5000,
     },
 }
 
@@ -2673,7 +2849,6 @@ def check_and_grant_achievements(user: dict) -> list[str]:
     cds = get_boss_cooldowns(user)
     _try("all_bosses", all(k in cds for k in BOSSES))
 
-    tools_owned = get_tools(user)
     gather_total = _sum_resources(user)
     loc_cds = get_location_boss_cooldowns(user)
 
@@ -2685,14 +2860,18 @@ def check_and_grant_achievements(user: dict) -> list[str]:
     _try("first_ore", user.get("stat_mine_count", 0) >= 1)
     _try("gather_100", gather_total >= 100)
     _try("gather_1000", gather_total >= 1000)
-    _try("craft_first", len(tools_owned) >= 1)
-    _try("craft_all_t1", all(order[0] in tools_owned for order in TOOL_TIER_ORDER.values()))
-    _try("craft_all_t3", all(order[2] in tools_owned for order in TOOL_TIER_ORDER.values()))
+    _try("craft_first", any(get_tool_level(user, t) >= 1 for t in TOOL_TIERS))
+    _try("craft_all_t1", all(get_tool_level(user, t) >= 1 for t in TOOL_TIERS))
+    _try("craft_all_t3", all(get_tool_level(user, t) >= 3 for t in TOOL_TIERS))
     _try("gskill_max", any(user.get(sk, 0) >= 10 for sk in GATHER_SKILL_CONFIG))
     _try("loc_boss_first", user.get("stat_location_boss_kills", 0) >= 1)
     _try("loc_boss_all", all(k in loc_cds for k in LOCATION_BOSSES))
     legendary_res_keys = {"diamond", "golden_fish", "snow_pelt"}
     _try("legendary_resource", any(get_resources(user).get(k, 0) > 0 for k in legendary_res_keys))
+    _try("gather_collection_hunting", _gather_full_collection(user, "hunting"))
+    _try("gather_collection_fishing", _gather_full_collection(user, "fishing"))
+    _try("gather_collection_mining", _gather_full_collection(user, "mining"))
+    _try("craft_all_max", all(get_tool_level(user, t) >= len(TOOL_TIERS[t]) for t in TOOL_TIERS))
     if new_achs:
         save_achievements(user["user_id"], owned)
         total_coins = 0
@@ -2890,10 +3069,9 @@ def init_db():
                 ("last_mine_time", "INTEGER DEFAULT 0"),
 
                 ("resources", "TEXT DEFAULT '{}'"),  # {"fur": 5, "iron_ore": 2, ...}
-                ("tools", "TEXT DEFAULT '{}'"),  # {"pickaxe_iron": 1, ...} (уровень тира)
-                ("equipped_tool_mining", "TEXT DEFAULT ''"),
-                ("equipped_tool_fishing", "TEXT DEFAULT ''"),
-                ("equipped_tool_hunting", "TEXT DEFAULT ''"),
+                ("tool_level_hunting", "INTEGER DEFAULT 0"),
+                ("tool_level_fishing", "INTEGER DEFAULT 0"),
+                ("tool_level_mining", "INTEGER DEFAULT 0"),
 
                 ("location_items", "TEXT DEFAULT '{}'"),  # трофеи с локационных боссов {key: level}
                 ("equipped_location_item", "TEXT DEFAULT ''"),
@@ -2908,6 +3086,13 @@ def init_db():
                 ("ascension_upgrades", "TEXT DEFAULT '{}'"),
                 ("ascension_items", "TEXT DEFAULT '{}'"),
                 ("equipped_ascension_item", "TEXT DEFAULT ''"),
+                ("vehicles", "TEXT DEFAULT '{}'"),
+                ("last_xp_collect", "INTEGER DEFAULT 0"),
+                ("active_zone_hunting", "TEXT DEFAULT ''"),
+                ("active_zone_fishing", "TEXT DEFAULT ''"),
+                ("active_zone_mining", "TEXT DEFAULT ''"),
+                ("gather_collection", "TEXT DEFAULT '{}'"),
+                ("mastery_claimed", "TEXT DEFAULT '{}'"),
             ]:
                 try:
                     with get_conn() as conn:  # <-- отдельное соединение на каждый ALTER
@@ -6410,25 +6595,27 @@ async def cmd_give_tool(message: Message):
         await message.answer("⛔ Нет доступа.")
         return
     parts = message.text.strip().split()
-    target_id, key = _resolve_id_and_arg(message, parts)
-    if not target_id or not key or key not in TOOLS:
-        keys = "\n".join(f"  <code>{k}</code> — {v['name']}" for k, v in TOOLS.items())
+    target_id = None
+    ttype = None
+    level = None
+    if message.reply_to_message and message.reply_to_message.from_user:
+        target_id = message.reply_to_message.from_user.id
+        if len(parts) >= 3 and parts[2].isdigit():
+            ttype, level = parts[1], int(parts[2])
+    else:
+        if len(parts) >= 4 and parts[1].isdigit() and parts[3].isdigit():
+            target_id, ttype, level = int(parts[1]), parts[2], int(parts[3])
+
+    if not target_id or ttype not in TOOL_TIERS or not level or not (0 <= level <= len(TOOL_TIERS[ttype])):
         await message.answer(
-            "❌ Формат:\n<code>/give_tool 12345678 pickaxe_iron</code>\n"
-            "или ответом: <code>/give_tool pickaxe_iron</code>\n\n"
-            f"Доступные инструменты:\n{keys}"
+            "❌ Формат:\n<code>/give_tool 12345678 mining 5</code>\n"
+            "или ответом: <code>/give_tool mining 5</code>\n\n"
+            "Типы: mining / fishing / hunting"
         )
         return
     register_user(target_id)
-    user = get_user(target_id)
-    tools_owned = get_tools(user)
-    tools_owned[key] = 1
-    save_tools(target_id, tools_owned)
-    ttype = TOOLS[key]["type"]
-    equip_field = f"equipped_tool_{ttype}"
-    if not user.get(equip_field):
-        update_user(target_id, **{equip_field: key})
-    await message.answer(f"✅ Инструмент <b>{TOOLS[key]['name']}</b> выдан пользователю <code>{target_id}</code>")
+    update_user(target_id, **{f"tool_level_{ttype}": level})
+    await message.answer(f"✅ Инструмент «{ttype}» установлен на уровень {level} для <code>{target_id}</code>")
 
 @dp.message(Command("give_location_item"))
 async def cmd_give_location_item(message: Message):
@@ -8115,7 +8302,7 @@ def grant_achievement_now(user_id: int, key: str) -> str | None:
 
 
 @dp.message(Command("gacha"))
-@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("гача", "питомец", "gacha")))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("гача", "питомец", "gacha", "петы")))
 async def cmd_gacha(message: Message):
     import json
     uid = message.from_user.id
@@ -8938,6 +9125,36 @@ EVENTS = {
         "global_luck_bonus": 15,    # новое поле
         "emoji": "🌌",
     },
+    "mega_coins_10x": {
+        "name":        "💥 МЕГА Золотая лихорадка x10",
+        "description": "Все монеты с работы x10! Событие для избранных.",
+        "duration_hours": 3,
+        "multiplier_xp":    1.0,
+        "multiplier_coins": 10.0,
+        "lucky_boost":      0,
+        "shop_discount":    0,
+        "emoji":       "💥",
+    },
+    "mega_xp_10x": {
+        "name":        "💥 МЕГА Прорыв опыта x10",
+        "description": "Весь опыт с работы x10!",
+        "duration_hours": 3,
+        "multiplier_xp":    10.0,
+        "multiplier_coins": 1.0,
+        "lucky_boost":      0,
+        "shop_discount":    0,
+        "emoji":       "💥",
+    },
+    "mega_both_10x": {
+        "name":        "🌋 АБСОЛЮТНЫЙ ИВЕНТ x10",
+        "description": "Монеты И опыт x10 одновременно! Легендарное событие.",
+        "duration_hours": 2,
+        "multiplier_xp":    10.0,
+        "multiplier_coins": 10.0,
+        "lucky_boost":      25,
+        "shop_discount":    0,
+        "emoji":       "🌋",
+    },
 }
 
 # Хранилище активного ивента в памяти
@@ -9588,6 +9805,19 @@ def do_fight_boss(user: dict, boss_key: str) -> tuple[bool, str]:
     shards = random.randint(boss["reward_shards_min"], boss["reward_shards_max"])
     shards = int(shards * (1 + boss_bonus / 100))
     new_shards = user.get("shards", 0) + shards
+    base_coins = int(boss["power_threshold"] * random.uniform(1.8, 2.8))
+    base_exp = int(boss["power_threshold"] * random.uniform(2.5, 4.0))
+    ev_coins_mult, ev_xp_mult, _, _ = get_event_multipliers()
+    earned_coins = apply_full_coin_bonus(user, base_coins)  # уже учитывает ивент-монеты
+    earned_exp = int(apply_combined_xp_bonus(user, base_exp) * ev_xp_mult)
+
+    fresh = get_user(user["user_id"])
+    new_balance = fresh["balance"] + earned_coins
+    new_exp = fresh["exp"] + earned_exp
+    update_user(user["user_id"], balance=new_balance, exp=new_exp)
+    user = {**fresh, "balance": new_balance, "exp": new_exp}
+    user, level_msgs = auto_level_up(user)
+    level_block = "".join(level_msgs)
     if random.random() < 0.15:  # 15% шанс капнуть кристалл с обычного босса
         update_user(user["user_id"], ascension_crystals=user.get("ascension_crystals", 0) + 1)
     update_user(user["user_id"], shards=new_shards)
@@ -9620,6 +9850,9 @@ def do_fight_boss(user: dict, boss_key: str) -> tuple[bool, str]:
         f"💪 Твоя сила: <b>{user_power}</b> vs 👹 Сила босса: <b>{boss_power}</b>\n\n"
         f"🏆 <b>ПОБЕДА!</b>\n<i>{boss['win_text']}</i>\n\n"
         f"🔶 Осколков получено: <b>+{shards}</b> (всего: {new_shards})\n"
+        f"💰 Монет: <b>+{earned_coins}</b>\n"
+        f"✨ Опыта: <b>+{earned_exp}</b>\n"
+        f"{level_block}"
         f"⚡ Энергия: <b>{new_energy}</b> (-{boss['energy_cost']})\n"
         f"🔁 Следующая попытка через {boss['cooldown_hours']}ч."
         f"{item_line}{extra}"
@@ -9880,29 +10113,44 @@ async def cmd_announce(message: Message):
 # =====================================================================
 import json as _json_gather
 RESOURCES = {
-    # ── Охота ──
-    "fur":          {"name": "🦫 Шкура",        "sell_price": 12,  "rarity": "common",    "loc": "hunting"},
-    "meat":         {"name": "🍖 Мясо",          "sell_price": 15,  "rarity": "common",    "loc": "hunting"},
-    "bone":         {"name": "🦴 Кость",         "sell_price": 20,  "rarity": "rare",      "loc": "hunting"},
-    "wolf_fang":    {"name": "🐺 Клык волка",    "sell_price": 45,  "rarity": "epic",      "loc": "hunting"},
-    "snow_pelt":    {"name": "❄️ Шкура барса",   "sell_price": 90,  "rarity": "legendary", "loc": "hunting"},
+    # ══════════ ОХОТА ══════════
+    "fur":            {"name": "🦫 Шкура",              "sell_price": 12,  "rarity": "common",    "loc": "hunting"},
+    "meat":           {"name": "🍖 Мясо",                "sell_price": 15,  "rarity": "common",    "loc": "hunting"},
+    "bone":           {"name": "🦴 Кость",               "sell_price": 22,  "rarity": "uncommon",  "loc": "hunting"},
+    "leather_hide":   {"name": "🟫 Дублёная шкура",      "sell_price": 30,  "rarity": "uncommon",  "loc": "hunting"},
+    "wolf_fang":      {"name": "🐺 Клык волка",          "sell_price": 45,  "rarity": "rare",      "loc": "hunting"},
+    "eagle_feather":  {"name": "🦅 Перо беркута",        "sell_price": 55,  "rarity": "rare",      "loc": "hunting"},
+    "ibex_horn":      {"name": "🐐 Рог тэке",            "sell_price": 90,  "rarity": "epic",      "loc": "hunting"},
+    "snow_pelt":      {"name": "❄️ Шкура барса",         "sell_price": 130, "rarity": "epic",      "loc": "hunting"},
+    "golden_antler":  {"name": "🦌✨ Золотые рога",       "sell_price": 220, "rarity": "legendary", "loc": "hunting"},
+    "manas_essence":  {"name": "🐎 Эссенция духа Манаса","sell_price": 400, "rarity": "mythic",    "loc": "hunting"},
 
-    # ── Рыбалка ──
-    "small_fish":   {"name": "🐟 Мелкая рыба",   "sell_price": 10,  "rarity": "common",    "loc": "fishing"},
-    "carp":         {"name": "🐠 Карп",          "sell_price": 18,  "rarity": "common",    "loc": "fishing"},
-    "pearl":        {"name": "🦪 Жемчужина",     "sell_price": 35,  "rarity": "rare",      "loc": "fishing"},
-    "big_catfish":  {"name": "🐡 Сом-гигант",    "sell_price": 60,  "rarity": "epic",      "loc": "fishing"},
-    "golden_fish":  {"name": "🐟✨ Золотая рыбка","sell_price": 120, "rarity": "legendary", "loc": "fishing"},
+    # ══════════ РЫБАЛКА ══════════
+    "small_fish":     {"name": "🐟 Мелкая рыба",         "sell_price": 10,  "rarity": "common",    "loc": "fishing"},
+    "carp":           {"name": "🐠 Карп",                "sell_price": 18,  "rarity": "common",    "loc": "fishing"},
+    "trout":          {"name": "🐟 Форель",              "sell_price": 24,  "rarity": "uncommon",  "loc": "fishing"},
+    "pearl":          {"name": "🦪 Жемчужина",           "sell_price": 35,  "rarity": "uncommon",  "loc": "fishing"},
+    "big_catfish":    {"name": "🐡 Сом-гигант",          "sell_price": 60,  "rarity": "rare",      "loc": "fishing"},
+    "river_crystal":  {"name": "🔷 Речной кристалл",     "sell_price": 75,  "rarity": "rare",      "loc": "fishing"},
+    "turtle_shell":   {"name": "🐢 Панцирь черепахи",    "sell_price": 110, "rarity": "epic",      "loc": "fishing"},
+    "golden_fish":    {"name": "🐟✨ Золотая рыбка",      "sell_price": 150, "rarity": "epic",      "loc": "fishing"},
+    "kraken_scale":   {"name": "🐙 Чешуя кракена",       "sell_price": 240, "rarity": "legendary", "loc": "fishing"},
+    "issykkul_pearl": {"name": "🌊✨ Жемчужина Иссык-Куля","sell_price": 420, "rarity": "mythic",    "loc": "fishing"},
 
-    # ── Шахта ──
-    "stone":        {"name": "🪨 Камень",        "sell_price": 8,   "rarity": "common",    "loc": "mining"},
-    "coal":         {"name": "⚫ Уголь",          "sell_price": 14,  "rarity": "common",    "loc": "mining"},
-    "iron_ore":     {"name": "⛓ Железная руда",  "sell_price": 25,  "rarity": "rare",      "loc": "mining"},
-    "silver_ore":   {"name": "🔗 Серебряная руда","sell_price": 50,  "rarity": "epic",      "loc": "mining"},
-    "diamond":      {"name": "💎 Алмаз",         "sell_price": 130, "rarity": "legendary", "loc": "mining"},
+    # ══════════ ШАХТА ══════════
+    "stone":          {"name": "🪨 Камень",              "sell_price": 8,   "rarity": "common",    "loc": "mining"},
+    "coal":           {"name": "⚫ Уголь",                "sell_price": 14,  "rarity": "common",    "loc": "mining"},
+    "iron_ore":       {"name": "⛓ Железная руда",        "sell_price": 25,  "rarity": "uncommon",  "loc": "mining"},
+    "copper_ore":     {"name": "🟠 Медная руда",         "sell_price": 32,  "rarity": "uncommon",  "loc": "mining"},
+    "silver_ore":     {"name": "🔗 Серебряная руда",     "sell_price": 50,  "rarity": "rare",      "loc": "mining"},
+    "gold_ore":       {"name": "🟡 Золотая руда",        "sell_price": 70,  "rarity": "rare",      "loc": "mining"},
+    "platinum_ore":   {"name": "⚪ Платиновая руда",     "sell_price": 110, "rarity": "epic",      "loc": "mining"},
+    "diamond":        {"name": "💎 Алмаз",               "sell_price": 130, "rarity": "epic",      "loc": "mining"},
+    "mythril_shard":  {"name": "🔮 Осколок мифрила",     "sell_price": 250, "rarity": "legendary", "loc": "mining"},
+    "star_core":      {"name": "🌌 Ядро звезды",         "sell_price": 450, "rarity": "mythic",    "loc": "mining"},
 }
 
-RESOURCE_RARITY_WEIGHTS = {"common": 55, "rare": 30, "epic": 12, "legendary": 3}
+RESOURCE_RARITY_WEIGHTS = {"common": 55, "uncommon": 38, "rare": 30, "epic": 12, "legendary": 3, "mythic": 1}
 
 GATHER_NODES = {
     "hunting": {
@@ -9934,77 +10182,248 @@ GATHER_NODES = {
     },
 }
 
+ZONES = {
+    "hunting": {
+        "forest_edge": {
+            "name": "🌳 Опушка леса", "min_skill": 0,
+            "pool": {"fur": 40, "meat": 40, "bone": 15, "leather_hide": 4, "wolf_fang": 1},
+            "yield_mult": 1.0, "energy_mult": 1.0,
+            "flavor": "Обычный лес рядом с Джалом.",
+        },
+        "dense_thicket": {
+            "name": "🌲 Густая чаща", "min_skill": 5,
+            "pool": {"fur": 25, "meat": 30, "bone": 22, "leather_hide": 13, "wolf_fang": 8, "eagle_feather": 2},
+            "yield_mult": 1.3, "energy_mult": 1.2,
+            "flavor": "Гуще заросли — опаснее звери, но добыча богаче.",
+        },
+        "mountain_pass": {
+            "name": "🏔 Горный перевал", "min_skill": 12,
+            "pool": {"bone": 20, "leather_hide": 22, "wolf_fang": 20, "eagle_feather": 18, "ibex_horn": 15, "snow_pelt": 5},
+            "yield_mult": 1.7, "energy_mult": 1.5,
+            "flavor": "Здесь бродят волчьи стаи и снежные барсы.",
+        },
+        "tian_shan_peaks": {
+            "name": "⛰ Вершины Тянь-Шаня", "min_skill": 20,
+            "pool": {"wolf_fang": 18, "eagle_feather": 20, "ibex_horn": 25, "snow_pelt": 25, "golden_antler": 10, "manas_essence": 2},
+            "yield_mult": 2.2, "energy_mult": 1.8,
+            "flavor": "Царство редчайших зверей. Только для мастеров.",
+        },
+        "legendary_steppe": {
+            "name": "🐎 Легендарная степь", "min_skill": 35,
+            "pool": {"ibex_horn": 20, "snow_pelt": 25, "golden_antler": 35, "manas_essence": 20},
+            "yield_mult": 3.0, "energy_mult": 2.3,
+            "flavor": "Место, где, по легенде, охотился сам Манас.",
+        },
+    },
+    "fishing": {
+        "shallow_creek": {
+            "name": "🏞 Мелкий ручей", "min_skill": 0,
+            "pool": {"small_fish": 45, "carp": 35, "trout": 15, "pearl": 4, "big_catfish": 1},
+            "yield_mult": 1.0, "energy_mult": 1.0,
+            "flavor": "Спокойное место для новичков.",
+        },
+        "jal_river": {
+            "name": "🌊 Река у Джала", "min_skill": 5,
+            "pool": {"small_fish": 25, "carp": 30, "trout": 22, "pearl": 13, "big_catfish": 8, "river_crystal": 2},
+            "yield_mult": 1.3, "energy_mult": 1.2,
+            "flavor": "Течение сильнее, рыба крупнее.",
+        },
+        "issyk_kul_shore": {
+            "name": "🏔 Побережье Иссык-Куля", "min_skill": 12,
+            "pool": {"trout": 20, "pearl": 22, "big_catfish": 20, "river_crystal": 18, "turtle_shell": 15, "golden_fish": 5},
+            "yield_mult": 1.7, "energy_mult": 1.5,
+            "flavor": "Легендарное озеро хранит немало сокровищ.",
+        },
+        "abyss_depths": {
+            "name": "🌌 Глубины бездны", "min_skill": 20,
+            "pool": {"big_catfish": 18, "river_crystal": 20, "turtle_shell": 25, "golden_fish": 25, "kraken_scale": 10, "issykkul_pearl": 2},
+            "yield_mult": 2.2, "energy_mult": 1.8,
+            "flavor": "Только опытные рыбаки решаются заплыть так далеко.",
+        },
+        "sacred_waters": {
+            "name": "🌊✨ Священные воды", "min_skill": 35,
+            "pool": {"turtle_shell": 20, "golden_fish": 25, "kraken_scale": 35, "issykkul_pearl": 20},
+            "yield_mult": 3.0, "energy_mult": 2.3,
+            "flavor": "Место, куда заплывают только легенды рыбалки.",
+        },
+    },
+    "mining": {
+        "old_quarry": {
+            "name": "🪨 Старый карьер", "min_skill": 0,
+            "pool": {"stone": 45, "coal": 35, "iron_ore": 15, "copper_ore": 4, "silver_ore": 1},
+            "yield_mult": 1.0, "energy_mult": 1.0,
+            "flavor": "Заброшенный карьер рядом с КТУ.",
+        },
+        "coal_tunnels": {
+            "name": "⛏ Угольные туннели", "min_skill": 5,
+            "pool": {"stone": 25, "coal": 30, "iron_ore": 22, "copper_ore": 13, "silver_ore": 8, "gold_ore": 2},
+            "yield_mult": 1.3, "energy_mult": 1.2,
+            "flavor": "Глубже под землёй — больше руды.",
+        },
+        "silver_caverns": {
+            "name": "🕳 Серебряные пещеры", "min_skill": 12,
+            "pool": {"iron_ore": 20, "copper_ore": 22, "silver_ore": 20, "gold_ore": 18, "platinum_ore": 15, "diamond": 5},
+            "yield_mult": 1.7, "energy_mult": 1.5,
+            "flavor": "Опасные обвалы, но богатая жила.",
+        },
+        "diamond_abyss": {
+            "name": "💎 Алмазная бездна", "min_skill": 20,
+            "pool": {"silver_ore": 18, "gold_ore": 20, "platinum_ore": 25, "diamond": 25, "mythril_shard": 10, "star_core": 2},
+            "yield_mult": 2.2, "energy_mult": 1.8,
+            "flavor": "Самая глубокая точка штольни Тянь-Шаня.",
+        },
+        "core_of_tianshan": {
+            "name": "🌌 Ядро Тянь-Шаня", "min_skill": 35,
+            "pool": {"platinum_ore": 20, "diamond": 25, "mythril_shard": 35, "star_core": 20},
+            "yield_mult": 3.0, "energy_mult": 2.3,
+            "flavor": "Геологи считают, что глубже уже некуда.",
+        },
+    },
+}
+
+MASTERY_RANKS = [
+    (10,  "🥉 Подмастерье",      5,  {"shards": 30}),
+    (20,  "🥈 Умелец",           10, {"shards": 60, "ascension_crystals": 1}),
+    (35,  "🥇 Мастер",           18, {"shards": 120, "ascension_crystals": 2}),
+    (50,  "💠 Грандмастер",      28, {"shards": 250, "ascension_crystals": 4}),
+    (75,  "👑 Легенда промысла", 40, {"shards": 500, "ascension_crystals": 8}),
+    (100, "🌌 Владыка стихий",   60, {"shards": 1000, "ascension_crystals": 15}),
+]
+
+def get_mastery_rank(skill_val: int) -> tuple[str, int]:
+    name, bonus = "", 0
+    for threshold, rank_name, pct, _ in MASTERY_RANKS:
+        if skill_val >= threshold:
+            name, bonus = rank_name, pct
+    return name, bonus
+
+def get_mastery_claimed(user: dict) -> set:
+    import json
+    raw = user.get("mastery_claimed", "") or "{}"
+    try:
+        data = json.loads(raw)
+    except Exception:
+        data = {}
+    return set(data.get("claimed", []))
+
+def save_mastery_claimed(user_id: int, claimed: set):
+    import json
+    update_user(user_id, mastery_claimed=json.dumps({"claimed": list(claimed)}))
+
+def check_and_grant_mastery(user_id: int, skill_key: str, skill_val: int) -> list[str]:
+    user = get_user(user_id)
+    if not user:
+        return []
+    claimed = get_mastery_claimed(user)
+    messages = []
+    for threshold, rank_name, pct, rewards in MASTERY_RANKS:
+        tag = f"{skill_key}:{threshold}"
+        if skill_val >= threshold and tag not in claimed:
+            claimed.add(tag)
+            extra = {}
+            for field, amount in rewards.items():
+                extra[field] = user.get(field, 0) + amount
+            update_user(user_id, **extra)
+            reward_str = ", ".join(f"+{v} {k}" for k, v in rewards.items())
+            messages.append(
+                f"🏆 <b>Новый ранг мастерства!</b> {rank_name} (ур. {threshold})\n"
+                f"🎁 Награда: {reward_str}\n"
+                f"📈 Постоянный бонус к добыче: +{pct}%"
+            )
+    if messages:
+        save_mastery_claimed(user_id, claimed)
+    return messages
+
+def get_active_zone_key(user: dict, node_key: str) -> str:
+    field = f"active_zone_{node_key}"
+    zk = user.get(field, "") or ""
+    zones = ZONES[node_key]
+    if zk in zones:
+        skill_val = user.get(GATHER_NODES[node_key]["skill_key"], 0)
+        if skill_val >= zones[zk]["min_skill"]:
+            return zk
+    return list(zones.keys())[0]
+
+def _luck_weight_boost(rarity: str, luck_bonus: int) -> int:
+    if rarity == "mythic":
+        return luck_bonus * 3
+    if rarity == "legendary":
+        return luck_bonus * 2
+    if rarity == "epic":
+        return luck_bonus
+    return 0
+
+def roll_resource_from_pool(pool: dict, luck_bonus: int) -> str:
+    keys = list(pool.keys())
+    weights = []
+    for k in keys:
+        rarity = RESOURCES[k]["rarity"]
+        w = pool[k] + _luck_weight_boost(rarity, luck_bonus)
+        weights.append(max(1, w))
+    return random.choices(keys, weights=weights, k=1)[0]
+
+def roll_resource(loc: str, luck_bonus: int) -> str:
+    pool = [k for k, v in RESOURCES.items() if v["loc"] == loc]
+    weights = []
+    for k in pool:
+        rarity = RESOURCES[k]["rarity"]
+        base_w = RESOURCE_RARITY_WEIGHTS[rarity]
+        weights.append(max(1, base_w + _luck_weight_boost(rarity, luck_bonus)))
+    return random.choices(pool, weights=weights, k=1)[0]
+
+def build_zone_text(user: dict, node_key: str) -> str:
+    zones = ZONES[node_key]
+    skill_val = user.get(GATHER_NODES[node_key]["skill_key"], 0)
+    current = get_active_zone_key(user, node_key)
+    lines = [f"🗺 <b>Зоны — {GATHER_NODES[node_key]['label']}</b>\n"]
+    for k, z in zones.items():
+        locked = skill_val < z["min_skill"]
+        mark = " ✅ активна" if k == current else ""
+        status = f"🔒 нужен навык {z['min_skill']}" if locked else "🔓 доступна"
+        lines.append(
+            f"<b>{z['name']}</b> — {status}{mark}\n"
+            f"  <i>{z['flavor']}</i>\n"
+            f"  Бонус добычи: x{z['yield_mult']} | Энергозатраты: x{z['energy_mult']}"
+        )
+    return "\n\n".join(lines)
+
+def get_zone_keyboard(user: dict, node_key: str) -> InlineKeyboardMarkup:
+    zones = ZONES[node_key]
+    skill_val = user.get(GATHER_NODES[node_key]["skill_key"], 0)
+    builder = InlineKeyboardBuilder()
+    for k, z in zones.items():
+        if skill_val >= z["min_skill"]:
+            builder.button(text=f"🗺 {z['name']}", callback_data=f"zone_set:{node_key}:{k}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("зона охота", "зона рыбалка", "зона шахта")))
+async def txt_zone_menu(message: Message):
+    mapping = {"зона охота": "hunting", "зона рыбалка": "fishing", "зона шахта": "mining"}
+    node_key = mapping[message.text.strip().lower()]
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
+    await message.answer(build_zone_text(user, node_key), reply_markup=get_zone_keyboard(user, node_key))
+
+@dp.callback_query(F.data.startswith("zone_set:"))
+async def cb_zone_set(callback: CallbackQuery):
+    _, node_key, zone_key = callback.data.split(":")
+    user = get_user_safe(callback.from_user.id)
+    skill_val = user.get(GATHER_NODES[node_key]["skill_key"], 0)
+    zone = ZONES[node_key].get(zone_key)
+    if not zone or skill_val < zone["min_skill"]:
+        await callback.answer("Зона недоступна!", show_alert=True)
+        return
+    update_user(callback.from_user.id, **{f"active_zone_{node_key}": zone_key})
+    await callback.answer(f"✅ Зона установлена: {zone['name']}!", show_alert=True)
+    updated = get_user(callback.from_user.id)
+    await callback.message.edit_text(build_zone_text(updated, node_key), reply_markup=get_zone_keyboard(updated, node_key))
+
 # =====================================================================
 # ИНСТРУМЕНТЫ (крафт из ресурсов + монет). Дают:
 #   - yield_bonus_pct: % к количеству добычи
 #   - luck_bonus: смещает шансы в сторону редких ресурсов
 #   - req_level: игровой уровень для крафта/использования
 # =====================================================================
-TOOLS = {
-    # ── Кирки ──
-    "pickaxe_wood": {
-        "name": "🪓 Деревянная кирка", "type": "mining", "tier": 1,
-        "yield_bonus_pct": 10, "luck_bonus": 2, "req_level": 1,
-        "recipe_coins": 200, "recipe_resources": {"stone": 5},
-        "description": "Простейшая кирка. Лучше, чем ничего.",
-    },
-    "pickaxe_iron": {
-        "name": "⛏ Железная кирка", "type": "mining", "tier": 2,
-        "yield_bonus_pct": 25, "luck_bonus": 6, "req_level": 15,
-        "recipe_coins": 1200, "recipe_resources": {"iron_ore": 8, "coal": 6},
-        "description": "Крепкая кирка шахтёра.",
-    },
-    "pickaxe_diamond": {
-        "name": "💎 Алмазная кирка", "type": "mining", "tier": 3,
-        "yield_bonus_pct": 50, "luck_bonus": 15, "req_level": 40,
-        "recipe_coins": 6000, "recipe_resources": {"silver_ore": 10, "diamond": 2},
-        "description": "Мечта каждого рудокопа КТУ.",
-    },
-
-    # ── Удочки ──
-    "rod_wood": {
-        "name": "🎣 Деревянная удочка", "type": "fishing", "tier": 1,
-        "yield_bonus_pct": 10, "luck_bonus": 2, "req_level": 1,
-        "recipe_coins": 180, "recipe_resources": {"small_fish": 5},
-        "description": "Простая удочка для начала пути.",
-    },
-    "rod_iron": {
-        "name": "🎣 Укреплённая удочка", "type": "fishing", "tier": 2,
-        "yield_bonus_pct": 25, "luck_bonus": 6, "req_level": 15,
-        "recipe_coins": 1100, "recipe_resources": {"carp": 10, "pearl": 3},
-        "description": "Выдержит даже сома-гиганта.",
-    },
-    "rod_pro": {
-        "name": "🎣 Профессиональный спиннинг", "type": "fishing", "tier": 3,
-        "yield_bonus_pct": 50, "luck_bonus": 15, "req_level": 40,
-        "recipe_coins": 5500, "recipe_resources": {"big_catfish": 6, "pearl": 8},
-        "description": "С таким снаряжением поймаешь золотую рыбку.",
-    },
-
-    # ── Мечи (для охоты) ──
-    "sword_wood": {
-        "name": "🗡 Деревянный меч", "type": "hunting", "tier": 1,
-        "yield_bonus_pct": 10, "luck_bonus": 2, "req_level": 1,
-        "recipe_coins": 200, "recipe_resources": {"bone": 3},
-        "description": "На первое время сойдёт.",
-    },
-    "sword_iron": {
-        "name": "⚔️ Железный меч", "type": "hunting", "tier": 2,
-        "yield_bonus_pct": 25, "luck_bonus": 6, "req_level": 15,
-        "recipe_coins": 1200, "recipe_resources": {"fur": 8, "wolf_fang": 2},
-        "description": "Надёжный клинок охотника.",
-    },
-    "sword_legendary": {
-        "name": "🗡✨ Клинок Снежного Барса", "type": "hunting", "tier": 3,
-        "yield_bonus_pct": 50, "luck_bonus": 15, "req_level": 40,
-        "recipe_coins": 6000, "recipe_resources": {"snow_pelt": 2, "wolf_fang": 5},
-        "description": "Выкован из трофеев легендарных зверей.",
-    },
-}
-
-TOOL_TIER_ORDER = {"mining": ["pickaxe_wood", "pickaxe_iron", "pickaxe_diamond"],
-                    "fishing": ["rod_wood", "rod_iron", "rod_pro"],
-                    "hunting": ["sword_wood", "sword_iron", "sword_legendary"]}
 
 # =====================================================================
 # ЛОКАЦИОННЫЕ БОССЫ (отдельно от BOSSES — своя механика и КД)
@@ -10127,16 +10546,18 @@ def save_resources(user_id: int, res: dict):
     update_user(user_id, resources=_json_gather.dumps(res))
 
 
-def get_tools(user: dict) -> dict:
-    raw = user.get("tools", "") or "{}"
-    try:
-        return _json_gather.loads(raw)
-    except Exception:
-        return {}
-
-
-def save_tools(user_id: int, tools: dict):
-    update_user(user_id, tools=_json_gather.dumps(tools))
+@dp.message(Command("mastery"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() == "мастерство"))
+async def cmd_mastery(message: Message):
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
+    lines = ["🎖 <b>Мастерство промыслов</b>\n"]
+    for skill_key, cfg in GATHER_SKILL_CONFIG.items():
+        val = user.get(skill_key, 0)
+        rank_name, pct = get_mastery_rank(val)
+        next_threshold = next((t for t, *_ in MASTERY_RANKS if t > val), None)
+        next_line = f"\nСледующий ранг на ур. {next_threshold}" if next_threshold else "\nМаксимальный ранг!"
+        lines.append(f"<b>{cfg['label']}</b>: ур. {val}\n  Ранг: {rank_name or '—'} (+{pct}%){next_line}")
+    await message.answer("\n\n".join(lines))
 
 
 def get_location_items(user: dict) -> dict:
@@ -10162,29 +10583,29 @@ def get_location_boss_cooldowns(user: dict) -> dict:
 def save_location_boss_cooldowns(user_id: int, cds: dict):
     update_user(user_id, location_boss_cooldowns=_json_gather.dumps(cds))
 
-
-def get_equipped_tool(user: dict, tool_type: str) -> str:
-    return user.get(f"equipped_tool_{tool_type}", "") or ""
-
-
 def get_gather_yield_bonus(user: dict, tool_type: str) -> tuple[int, int]:
-    """(yield_bonus_pct, luck_bonus) от инструмента + трофея с локационного босса."""
+    """tool_type здесь = node_key: "hunting" / "fishing" / "mining" """
     yield_pct, luck = 0, 0
-    tool_key = get_equipped_tool(user, tool_type)
-    if tool_key and tool_key in TOOLS:
-        yield_pct += TOOLS[tool_key]["yield_bonus_pct"]
-        luck += TOOLS[tool_key]["luck_bonus"]
+
+    level = get_tool_level(user, tool_type)
+    current_tool = get_current_tool(tool_type, level)
+    if current_tool:
+        yield_pct += current_tool["yield_bonus_pct"]
+        luck += current_tool["luck_bonus"]
 
     loc_key = user.get("equipped_location_item", "")
     if loc_key and loc_key in LOCATION_BOSS_ITEMS:
         item = LOCATION_BOSS_ITEMS[loc_key]
-        # трофей босса даёт бонус только если относится к этой же ветке добычи
         boss_loc = LOCATION_BOSSES.get(item["boss_only"], {}).get("loc")
         if boss_loc == tool_type:
             items_owned = get_location_items(user)
-            level = items_owned.get(loc_key, 1)
-            yield_pct += item["yield_bonus_pct"] + (level - 1) * 3
-            luck += item["luck_bonus"] + (level - 1) * 2
+            item_level = items_owned.get(loc_key, 1)
+            yield_pct += item["yield_bonus_pct"] + (item_level - 1) * 3
+            luck += item["luck_bonus"] + (item_level - 1) * 2
+
+    skill_key = GATHER_NODES[tool_type]["skill_key"]
+    _, mastery_pct = get_mastery_rank(user.get(skill_key, 0))
+    yield_pct += mastery_pct
 
     return yield_pct, luck
 
@@ -10195,21 +10616,9 @@ def get_gather_cooldown(user: dict, node_key: str) -> int:
     reduction = min(90, agility // 4)
     return max(30, node["cooldown"] - reduction)
 
+GATHER_BATCH_SIZES = [1, 5, 20]
 
-def roll_resource(loc: str, luck_bonus: int) -> str:
-    pool = [k for k, v in RESOURCES.items() if v["loc"] == loc]
-    weights = []
-    for k in pool:
-        rarity = RESOURCES[k]["rarity"]
-        base_w = RESOURCE_RARITY_WEIGHTS[rarity]
-        # удача смещает вес в сторону редких
-        if rarity in ("epic", "legendary"):
-            base_w += luck_bonus * (2 if rarity == "legendary" else 1)
-        weights.append(max(1, base_w))
-    return random.choices(pool, weights=weights, k=1)[0]
-
-
-def do_gather(user: dict, node_key: str) -> tuple[bool, str]:
+def do_gather(user: dict, node_key: str, times: int = 1) -> tuple[bool, str]:
     if is_incapacitated(user):
         return False, get_incapacitated_message(user)
     node = GATHER_NODES.get(node_key)
@@ -10218,6 +10627,8 @@ def do_gather(user: dict, node_key: str) -> tuple[bool, str]:
     if user["level"] < node["min_level"]:
         return False, f"❌ Нужен уровень <b>{node['min_level']}</b>."
 
+    times = max(1, min(times, 20))
+
     time_field = {"hunting": "last_hunt_time", "fishing": "last_fish_time", "mining": "last_mine_time"}[node_key]
     now = int(time.time())
     cooldown = get_gather_cooldown(user, node_key)
@@ -10225,61 +10636,89 @@ def do_gather(user: dict, node_key: str) -> tuple[bool, str]:
     if elapsed < cooldown:
         return False, f"⏳ Подожди ещё <b>{cooldown - elapsed}</b> сек."
 
-    energy_cost = apply_energy_discount(node["energy_cost"])
-    if user["energy"] < energy_cost:
+    zone_key = get_active_zone_key(user, node_key)
+    zone = ZONES[node_key][zone_key]
+
+    energy_cost_unit = apply_energy_discount(int(node["energy_cost"] * zone["energy_mult"]))
+    total_energy_cost = energy_cost_unit * times
+    if user["energy"] < total_energy_cost:
+        max_times = max(1, user["energy"] // max(1, energy_cost_unit))
         return False, (
-            f"😴 Недостаточно энергии! Нужно {energy_cost} ⚡, "
-            f"есть {user['energy']} ⚡."
+            f"😴 Недостаточно энергии на x{times}! Нужно {total_energy_cost} ⚡, "
+            f"есть {user['energy']} ⚡.\n<i>Хватит максимум на x{max_times}.</i>"
         )
-    new_energy = max(0, user["energy"] - energy_cost)
 
     skill_val = user.get(node["skill_key"], 0)
     yield_pct, luck_bonus = get_gather_yield_bonus(user, node["tool_type"])
-    total_luck = get_total_luck(user) + luck_bonus if "get_total_luck" in globals() else luck_bonus
-
+    total_luck = get_total_luck(user) + luck_bonus
     gather_mult = get_event_extra().get("gather_multiplier", 1.0)
-    base_amount = random.randint(node["yield_min"], node["yield_max"]) + skill_val // 5
-    amount = max(1, int(base_amount * (1 + yield_pct / 100) * gather_mult))
 
-    gained = {}
-    for _ in range(amount):
-        res_key = roll_resource(node_key, total_luck)
-        gained[res_key] = gained.get(res_key, 0) + 1
+    gained: dict[str, int] = {}
+    treasure_coins = 0
+    treasure_shards = 0
+    treasure_hits = 0
+
+    for _ in range(times):
+        base_amount = random.randint(node["yield_min"], node["yield_max"]) + skill_val // 5
+        amount = max(1, int(base_amount * (1 + yield_pct / 100) * zone["yield_mult"] * gather_mult))
+        for _ in range(amount):
+            res_key = roll_resource_from_pool(zone["pool"], total_luck)
+            gained[res_key] = gained.get(res_key, 0) + 1
+
+        if random.random() < min(0.25, 0.05 + total_luck / 200):
+            treasure_hits += 1
+            treasure_coins += random.randint(30, 90) * (1 + skill_val // 20)
+            treasure_shards += random.randint(1, 3)
 
     resources = get_resources(user)
     for k, v in gained.items():
         resources[k] = resources.get(k, 0) + v
     save_resources(user["user_id"], resources)
 
-    new_energy = max(0, user["energy"] - node["energy_cost"])
-    update_user(user["user_id"], energy=new_energy, **{time_field: now})
-    bump_stat(user["user_id"], {"hunting": "stat_hunt_count", "fishing": "stat_fish_count",
-                                "mining": "stat_mine_count"}[node_key])
+    import json as _js_coll
+    try:
+        coll = _js_coll.loads(user.get("gather_collection", "") or "{}")
+    except Exception:
+        coll = {}
+    for k, v in gained.items():
+        coll[k] = coll.get(k, 0) + v
+    update_user(user["user_id"], gather_collection=_js_coll.dumps(coll))
+
+    new_energy = max(0, user["energy"] - total_energy_cost)
+    extra_fields = {"energy": new_energy, time_field: now}
+    if treasure_coins:
+        extra_fields["balance"] = user["balance"] + apply_full_coin_bonus(user, treasure_coins)
+    if treasure_shards:
+        extra_fields["shards"] = user.get("shards", 0) + treasure_shards
+    update_user(user["user_id"], **extra_fields)
+
+    hunt_count_field = {"hunting": "stat_hunt_count", "fishing": "stat_fish_count", "mining": "stat_mine_count"}[node_key]
+    bump_stat(user["user_id"], hunt_count_field, times)
 
     injury_line = ""
     if random.random() < 0.20:
         fresh_user = get_user(user["user_id"])
-        new_hp, lost_hp = apply_hp_damage(user["user_id"], fresh_user, 5, 10)
-        injury_line = (
-            f"\n\n🩹 Ты получил травму во время добычи! "
-            f"❤️ HP: -{lost_hp} → {new_hp} / {get_max_hp(fresh_user)}"
-        )
+        new_hp, lost_hp = apply_hp_damage(user["user_id"], fresh_user, 4, 9)
+        injury_line = f"\n\n🩹 Травма во время добычи! ❤️ -{lost_hp} HP → {new_hp}/{get_max_hp(fresh_user)}"
 
-    lines_res = "\n".join(
-        f"  {RESOURCES[k]['name']} x{v}" for k, v in gained.items()
-    )
+    lines_res = "\n".join(f"  {RESOURCES[k]['name']} x{v}" for k, v in sorted(gained.items(), key=lambda x: -x[1]))
+    treasure_line = ""
+    if treasure_hits:
+        treasure_line = f"\n\n💰 <b>Найден клад x{treasure_hits}!</b>\n  +{treasure_coins} монет, +{treasure_shards} 🔶 осколков"
 
     updated = get_user(user["user_id"])
     ach_msgs = check_and_grant_achievements(updated) if updated else []
     title_msgs = check_and_grant_titles(updated) if updated else []
-    extra = ("\n\n" + "\n".join(ach_msgs + title_msgs)) if (ach_msgs or title_msgs) else ""
+    extra_msgs = ("\n\n" + "\n".join(ach_msgs + title_msgs)) if (ach_msgs or title_msgs) else ""
+
+    rank_name, rank_pct = get_mastery_rank(skill_val)
+    rank_line = f"\n🎖 Мастерство: <b>{rank_name or '—'}</b> (+{rank_pct}%)" if rank_name else ""
 
     return True, (
-        f"{node['label']} завершена!\n\n"
+        f"{node['label']} ×{times} — зона: <b>{zone['name']}</b>\n\n"
         f"📦 <b>Добыча:</b>\n{lines_res}\n\n"
-        f"⚡ Энергия: <b>{new_energy}</b> (-{energy_cost})"
-        f"{injury_line}"
-        f"{extra}"
+        f"⚡ Энергия: <b>{new_energy}</b> (-{total_energy_cost}){rank_line}"
+        f"{treasure_line}{injury_line}{extra_msgs}"
     )
 
 
@@ -10287,8 +10726,11 @@ def build_gather_text(user: dict, node_key: str) -> str:
     node = GATHER_NODES[node_key]
     skill_val = user.get(node["skill_key"], 0)
     yield_pct, luck_bonus = get_gather_yield_bonus(user, node["tool_type"])
-    tool_key = get_equipped_tool(user, node["tool_type"])
-    tool_name = TOOLS[tool_key]["name"] if tool_key in TOOLS else "нет"
+
+    tool_level = get_tool_level(user, node["tool_type"])
+    current_tool = get_current_tool(node["tool_type"], tool_level)
+    tool_name = current_tool["name"] if current_tool else "нет"
+
     cooldown = get_gather_cooldown(user, node_key)
 
     return (
@@ -10309,8 +10751,13 @@ def do_upgrade_gather_skill(user: dict, skill_key: str) -> tuple[bool, str]:
     cost = max(cfg["cost_base"], val * cfg["cost_base"])
     if user["balance"] < cost:
         return False, f"❌ Нужно <b>{cost}</b> монет, есть <b>{user['balance']}</b>."
-    update_user(user["user_id"], **{skill_key: val + 1, "balance": user["balance"] - cost})
-    return True, f"✅ <b>{cfg['label']}</b> прокачан до уровня <b>{val + 1}</b>! Потрачено {cost} монет."
+    new_val = val + 1
+    update_user(user["user_id"], **{skill_key: new_val, "balance": user["balance"] - cost})
+    text = f"✅ <b>{cfg['label']}</b> прокачан до уровня <b>{new_val}</b>! Потрачено {cost} монет."
+    mastery_msgs = check_and_grant_mastery(user["user_id"], skill_key, new_val)
+    if mastery_msgs:
+        text += "\n\n" + "\n".join(mastery_msgs)
+    return True, text
 
 
 def build_gather_skills_text(user: dict) -> tuple[str, "InlineKeyboardMarkup"]:
@@ -10345,6 +10792,61 @@ def do_sell_resource(user: dict, res_key: str, quantity: int) -> tuple[bool, str
     update_user(user["user_id"], balance=new_balance)
     return True, f"✅ Продано {res['name']} x{quantity} за <b>{total}</b> монет.\n💰 Баланс: <b>{new_balance}</b>"
 
+def do_sell_all_resources(user: dict) -> tuple[bool, str]:
+    resources = get_resources(user)
+    if not resources:
+        return False, "❌ У тебя нет ресурсов для продажи."
+
+    total = 0
+    lines = []
+    for k, qty in list(resources.items()):
+        if k not in RESOURCES or qty <= 0:
+            continue
+        price = RESOURCES[k]["sell_price"] * qty
+        total += price
+        lines.append(f"  {RESOURCES[k]['name']} x{qty} — {price} мон.")
+
+    if total == 0:
+        return False, "❌ Нечего продавать."
+
+    save_resources(user["user_id"], {})
+    new_balance = user["balance"] + total
+    update_user(user["user_id"], balance=new_balance)
+
+    return True, (
+        f"✅ <b>Продано всё!</b>\n\n" + "\n".join(lines) +
+        f"\n\n💰 Итого получено: <b>{total}</b> монет\n"
+        f"📊 Баланс: <b>{new_balance}</b> монет"
+    )
+
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("продать всё", "продать все", "sell all")))
+async def txt_sell_all(message: Message):
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
+    success, text = do_sell_all_resources(user)
+    await message.answer(text)
+
+def get_sell_keyboard(user: dict) -> "InlineKeyboardMarkup":
+    resources = get_resources(user)
+    builder = InlineKeyboardBuilder()
+    if resources:
+        builder.button(text="💰 Продать ВСЁ", callback_data="sell_all_res")
+    for k, v in resources.items():
+        if k not in RESOURCES or v <= 0:
+            continue
+        r = RESOURCES[k]
+        builder.button(text=f"💰 Продать {r['name']} x{v}", callback_data=f"sell_res:{k}:{v}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+@dp.callback_query(F.data == "sell_all_res")
+async def cb_sell_all(callback: CallbackQuery):
+    user = get_user_safe(callback.from_user.id)
+    success, text = do_sell_all_resources(user)
+    await callback.answer()
+    await callback.message.answer(text)
+    if success:
+        updated = get_user(callback.from_user.id)
+        await callback.message.edit_text(build_resources_text(updated), reply_markup=get_sell_keyboard(updated))
 
 def build_resources_text(user: dict) -> str:
     resources = get_resources(user)
@@ -10369,94 +10871,6 @@ def get_sell_keyboard(user: dict) -> "InlineKeyboardMarkup":
         builder.button(text=f"💰 Продать {r['name']} x{v}", callback_data=f"sell_res:{k}:{v}")
     builder.adjust(1)
     return builder.as_markup()
-
-
-def do_craft_tool(user: dict, tool_key: str) -> tuple[bool, str]:
-    tool = TOOLS.get(tool_key)
-    if not tool:
-        return False, "❌ Неизвестный инструмент."
-    if user["level"] < tool["req_level"]:
-        return False, f"❌ Нужен уровень <b>{tool['req_level']}</b>."
-
-    tools_owned = get_tools(user)
-    if tool_key in tools_owned:
-        return False, "У тебя уже есть этот инструмент!"
-
-    # Требуем, чтобы предыдущий тир (если есть) уже был скрафчен — прогрессия
-    order = TOOL_TIER_ORDER[tool["type"]]
-    idx = order.index(tool_key)
-    if idx > 0 and order[idx - 1] not in tools_owned:
-        prev_name = TOOLS[order[idx - 1]]["name"]
-        return False, f"❌ Сначала скрафти: {prev_name}"
-
-    if user["balance"] < tool["recipe_coins"]:
-        return False, f"❌ Нужно <b>{tool['recipe_coins']}</b> монет."
-
-    resources = get_resources(user)
-    for res_key, need in tool["recipe_resources"].items():
-        have = resources.get(res_key, 0)
-        if have < need:
-            res_name = RESOURCES.get(res_key, {}).get("name", res_key)
-            return False, f"❌ Не хватает: {res_name} ({have}/{need})"
-
-    for res_key, need in tool["recipe_resources"].items():
-        resources[res_key] -= need
-        if resources[res_key] <= 0:
-            del resources[res_key]
-    save_resources(user["user_id"], resources)
-
-    update_user(user["user_id"], balance=user["balance"] - tool["recipe_coins"])
-    tools_owned[tool_key] = 1
-    save_tools(user["user_id"], tools_owned)
-
-    # автоэкипировка, если это первый инструмент такого типа
-    equip_field = f"equipped_tool_{tool['type']}"
-    if not user.get(equip_field):
-        update_user(user["user_id"], **{equip_field: tool_key})
-
-    return True, f"✅ Скрафчено: <b>{tool['name']}</b>!\n<i>{tool['description']}</i>"
-
-
-def build_craft_text(user: dict) -> str:
-    lines = ["🛠 <b>Мастерская</b>\n"]
-    tools_owned = get_tools(user)
-    for ttype, order in TOOL_TIER_ORDER.items():
-        label = {"mining": "⛏ Шахта", "fishing": "🎣 Рыбалка", "hunting": "🏹 Охота"}[ttype]
-        lines.append(f"━━━ {label} ━━━")
-        for tk in order:
-            t = TOOLS[tk]
-            owned = "✅ есть" if tk in tools_owned else "🔒"
-            res_str = ", ".join(f"{RESOURCES[r]['name']} x{n}" for r, n in t["recipe_resources"].items())
-            lines.append(
-                f"{owned} <b>{t['name']}</b> (ур. {t['req_level']}+)\n"
-                f"  Крафт: {t['recipe_coins']} мон. + {res_str}\n"
-                f"  Бонус: +{t['yield_bonus_pct']}% добычи, +{t['luck_bonus']} удачи"
-            )
-    return "\n\n".join(lines)
-
-
-def get_craft_keyboard(user: dict) -> "InlineKeyboardMarkup":
-    tools_owned = get_tools(user)
-    builder = InlineKeyboardBuilder()
-    for tk, t in TOOLS.items():
-        if tk in tools_owned:
-            continue
-        builder.button(text=f"🛠 Скрафтить {t['name']}", callback_data=f"craft_tool:{tk}")
-    builder.adjust(1)
-    return builder.as_markup()
-
-
-def get_equip_tool_keyboard(user: dict) -> "InlineKeyboardMarkup":
-    tools_owned = get_tools(user)
-    builder = InlineKeyboardBuilder()
-    for tk in tools_owned:
-        if tk not in TOOLS:
-            continue
-        t = TOOLS[tk]
-        builder.button(text=f"🔧 Экипировать {t['name']}", callback_data=f"equip_tool:{tk}")
-    builder.adjust(1)
-    return builder.as_markup()
-
 
 # =====================================================================
 # ЛОКАЦИОННЫЕ БОССЫ — логика
@@ -10547,6 +10961,19 @@ def do_fight_location_boss(user: dict, boss_key: str) -> tuple[bool, str]:
         resources[rk] = resources.get(rk, 0) + 1
     save_resources(user["user_id"], resources)
     bump_stat(user["user_id"], "stat_location_boss_kills")
+    base_coins = int(boss["power_threshold"] * random.uniform(1.8, 2.8))
+    base_exp = int(boss["power_threshold"] * random.uniform(2.5, 4.0))
+    ev_coins_mult, ev_xp_mult, _, _ = get_event_multipliers()
+    earned_coins = apply_full_coin_bonus(user, base_coins)  # уже учитывает ивент-монеты
+    earned_exp = int(apply_combined_xp_bonus(user, base_exp) * ev_xp_mult)
+
+    fresh = get_user(user["user_id"])
+    new_balance = fresh["balance"] + earned_coins
+    new_exp = fresh["exp"] + earned_exp
+    update_user(user["user_id"], balance=new_balance, exp=new_exp)
+    user = {**fresh, "balance": new_balance, "exp": new_exp}
+    user, level_msgs = auto_level_up(user)
+    level_block = "".join(level_msgs)
     change_reputation(user["user_id"], +2)
 
     item_line = ""
@@ -10577,6 +11004,9 @@ def do_fight_location_boss(user: dict, boss_key: str) -> tuple[bool, str]:
         f"💪 Сила: <b>{power}</b> vs 👹 <b>{boss_power}</b>\n\n"
         f"🏆 <b>ПОБЕДА!</b>\n<i>{boss['win_text']}</i>\n\n"
         f"📦 Добыча:\n{res_lines}\n"
+        f"💰 Монет: <b>+{earned_coins}</b>\n"
+        f"✨ Опыта: <b>+{earned_exp}</b>\n"
+        f"{level_block}"
         f"⚡ -{boss['energy_cost']} | 🔁 КД {boss['cooldown_hours']}ч"
         f"{item_line}{extra}"
     )
@@ -10598,6 +11028,14 @@ def do_upgrade_location_item(user: dict, item_key: str) -> tuple[bool, str]:
     update_user(user["user_id"], shards=user.get("shards", 0) - cost)
     return True, f"✅ <b>{item['name']}</b> улучшен до уровня <b>{items[item_key]}</b>!"
 
+def _gather_full_collection(user: dict, loc: str) -> bool:
+    import json
+    try:
+        coll = json.loads(user.get("gather_collection", "") or "{}")
+    except Exception:
+        coll = {}
+    needed = [k for k, v in RESOURCES.items() if v["loc"] == loc]
+    return all(coll.get(k, 0) > 0 for k in needed)
 
 def build_location_bosses_text(user: dict) -> str:
     lines = ["👹 <b>Боссы локаций</b>\n"]
@@ -10631,25 +11069,56 @@ def get_location_bosses_keyboard(user: dict) -> "InlineKeyboardMarkup":
 # =====================================================================
 # ХЕНДЛЕРЫ
 # =====================================================================
-@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("охота", "hunt")))
+def _gather_cmd_match(t: str, keyword: str) -> bool:
+    if not t:
+        return False
+    parts = t.strip().lower().split()
+    if not parts or parts[0] != keyword:
+        return False
+    if len(parts) == 1:
+        return True
+    if len(parts) == 2 and parts[1].lstrip("x").isdigit():
+        return True
+    return False
+
+def get_gather_repeat_keyboard(node_key: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for n in GATHER_BATCH_SIZES:
+        builder.button(text=f"🔁 Ещё x{n}", callback_data=f"gather_do:{node_key}:{n}")
+    builder.adjust(3)
+    return builder.as_markup()
+
+@dp.message(F.text.func(lambda t: _gather_cmd_match(t, "охота") or _gather_cmd_match(t, "hunt")))
 async def txt_hunt(message: Message):
+    parts = message.text.strip().lower().split()
+    times = int(parts[1].lstrip("x")) if len(parts) == 2 else 1
     user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
-    _, text = do_gather(user, "hunting")
-    await message.answer(text)
+    _, text = do_gather(user, "hunting", times)
+    await message.answer(text, reply_markup=get_gather_repeat_keyboard("hunting"))
 
-
-@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("рыбалка", "fish")))
+@dp.message(F.text.func(lambda t: _gather_cmd_match(t, "рыбалка") or _gather_cmd_match(t, "fish")))
 async def txt_fish(message: Message):
+    parts = message.text.strip().lower().split()
+    times = int(parts[1].lstrip("x")) if len(parts) == 2 else 1
     user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
-    _, text = do_gather(user, "fishing")
-    await message.answer(text)
+    _, text = do_gather(user, "fishing", times)
+    await message.answer(text, reply_markup=get_gather_repeat_keyboard("fishing"))
 
-
-@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("шахта", "mine")))
+@dp.message(F.text.func(lambda t: _gather_cmd_match(t, "шахта") or _gather_cmd_match(t, "mine")))
 async def txt_mine(message: Message):
+    parts = message.text.strip().lower().split()
+    times = int(parts[1].lstrip("x")) if len(parts) == 2 else 1
     user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
-    _, text = do_gather(user, "mining")
-    await message.answer(text)
+    _, text = do_gather(user, "mining", times)
+    await message.answer(text, reply_markup=get_gather_repeat_keyboard("mining"))
+
+@dp.callback_query(F.data.startswith("gather_do:"))
+async def cb_gather_do(callback: CallbackQuery):
+    _, node_key, times = callback.data.split(":")
+    user = get_user_safe(callback.from_user.id)
+    await callback.answer()
+    _, text = do_gather(user, node_key, int(times))
+    await callback.message.answer(text, reply_markup=get_gather_repeat_keyboard(node_key))
 
 
 @dp.message(F.text.func(lambda t: t and t.strip().lower() in ("навыки сбора", "gskills")))
@@ -10694,56 +11163,6 @@ async def cb_sell_res(callback: CallbackQuery):
     if success:
         updated = get_user(callback.from_user.id)
         await callback.message.edit_text(build_resources_text(updated), reply_markup=get_sell_keyboard(updated))
-
-
-@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("мастерская", "крафт", "craft")))
-async def txt_craft(message: Message):
-    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
-    await message.answer(build_craft_text(user), reply_markup=get_craft_keyboard(user))
-
-
-@dp.callback_query(F.data.startswith("craft_tool:"))
-async def cb_craft_tool(callback: CallbackQuery):
-    key = callback.data.split(":")[1]
-    user = get_user_safe(callback.from_user.id)
-    success, text = do_craft_tool(user, key)
-    await callback.answer()
-    await callback.message.answer(text)
-    if success:
-        updated = get_user(callback.from_user.id)
-        await callback.message.edit_text(build_craft_text(updated), reply_markup=get_craft_keyboard(updated))
-
-
-@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("инструменты", "мои инструменты")))
-async def txt_my_tools(message: Message):
-    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
-    tools_owned = get_tools(user)
-    if not tools_owned:
-        await message.answer("🛠 У тебя пока нет инструментов. Скрафти их в 🛠 Мастерской.")
-        return
-    lines = ["🛠 <b>Твои инструменты</b>\n"]
-    for tk in tools_owned:
-        if tk not in TOOLS:
-            continue
-        t = TOOLS[tk]
-        eq = get_equipped_tool(user, t["type"])
-        mark = " ◀ экипирован" if eq == tk else ""
-        lines.append(f"{'✅' if eq == tk else '•'} {t['name']}{mark} (+{t['yield_bonus_pct']}%, +{t['luck_bonus']} удачи)")
-    await message.answer("\n".join(lines), reply_markup=get_equip_tool_keyboard(user))
-
-
-@dp.callback_query(F.data.startswith("equip_tool:"))
-async def cb_equip_tool(callback: CallbackQuery):
-    key = callback.data.split(":")[1]
-    user = get_user_safe(callback.from_user.id)
-    tools_owned = get_tools(user)
-    if key not in tools_owned or key not in TOOLS:
-        await callback.answer("У тебя нет этого инструмента!", show_alert=True)
-        return
-    ttype = TOOLS[key]["type"]
-    update_user(callback.from_user.id, **{f"equipped_tool_{ttype}": key})
-    await callback.answer(f"✅ Экипирован: {TOOLS[key]['name']}!", show_alert=True)
-
 
 @dp.message(Command("loc_bosses"))
 @dp.message(F.text.func(lambda t: t and t.strip().lower() in ("лок боссы", "боссы локаций")))
@@ -11073,7 +11492,7 @@ def get_ascension_gacha_keyboard() -> InlineKeyboardMarkup:
 
 @dp.message(Command("asc_gacha"))
 @dp.message(F.text.func(lambda t: t and t.strip().lower() in
-                                  ("гача вознесения", "гача кристаллов")))
+                                  ("гача вознесения", "гача кристаллов", "гача кристалл")))
 async def cmd_ascension_gacha(message: Message):
     user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
     await message.answer(build_ascension_gacha_text(user), reply_markup=get_ascension_gacha_keyboard())
@@ -11148,6 +11567,184 @@ async def cb_ascension_equip(callback: CallbackQuery):
         return
     update_user(callback.from_user.id, equipped_ascension_item=key)
     await callback.answer(f"✅ Экипирован: {ASCENSION_ITEMS[key]['name']}!", show_alert=True)
+
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("коллекция", "альбом")))
+async def cmd_collection(message: Message):
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
+    import json
+    try:
+        coll = json.loads(user.get("gather_collection", "") or "{}")
+    except Exception:
+        coll = {}
+    lines = ["📦 <b>Коллекция ресурсов</b>\n"]
+    for loc, label in (("hunting", "🏹 Охота"), ("fishing", "🎣 Рыбалка"), ("mining", "⛏ Шахта")):
+        lines.append(f"━━━ {label} ━━━")
+        for k, r in RESOURCES.items():
+            if r["loc"] != loc:
+                continue
+            have = coll.get(k, 0)
+            icon = "✅" if have > 0 else "❔"
+            lines.append(f"{icon} {r['name']} — добыто всего: {have}")
+    await message.answer("\n".join(lines))
+
+TOOL_TIERS = {
+    "mining": [
+        {"name": "🪓 Деревянная кирка", "yield_bonus_pct": 10, "luck_bonus": 2, "req_level": 1,
+         "recipe_coins": 200, "recipe_resources": {"stone": 5}},
+        {"name": "🪨 Каменная кирка", "yield_bonus_pct": 18, "luck_bonus": 4, "req_level": 8,
+         "recipe_coins": 500, "recipe_resources": {"stone": 15, "coal": 5}},
+        {"name": "⛏ Железная кирка", "yield_bonus_pct": 28, "luck_bonus": 7, "req_level": 15,
+         "recipe_coins": 1200, "recipe_resources": {"iron_ore": 10, "coal": 8}},
+        {"name": "🟠 Медная кирка+", "yield_bonus_pct": 38, "luck_bonus": 10, "req_level": 25,
+         "recipe_coins": 2500, "recipe_resources": {"copper_ore": 12, "iron_ore": 8}},
+        {"name": "🔗 Серебряная кирка", "yield_bonus_pct": 50, "luck_bonus": 15, "req_level": 35,
+         "recipe_coins": 4500, "recipe_resources": {"silver_ore": 12, "copper_ore": 10}},
+        {"name": "🟡 Золотая кирка", "yield_bonus_pct": 65, "luck_bonus": 20, "req_level": 50,
+         "recipe_coins": 8000, "recipe_resources": {"gold_ore": 12, "silver_ore": 10}},
+        {"name": "⚪ Платиновая кирка", "yield_bonus_pct": 85, "luck_bonus": 30, "req_level": 70,
+         "recipe_coins": 15000, "recipe_resources": {"platinum_ore": 10, "diamond": 5}},
+        {"name": "💎 Алмазная кирка", "yield_bonus_pct": 110, "luck_bonus": 45, "req_level": 90,
+         "recipe_coins": 30000, "recipe_resources": {"mythril_shard": 8, "diamond": 8}},
+        {"name": "🌌 Звёздная кирка", "yield_bonus_pct": 140, "luck_bonus": 60, "req_level": 100,
+         "recipe_coins": 60000, "recipe_resources": {"star_core": 5, "mythril_shard": 10}},
+    ],
+    "fishing": [
+        {"name": "🎣 Деревянная удочка", "yield_bonus_pct": 10, "luck_bonus": 2, "req_level": 1,
+         "recipe_coins": 180, "recipe_resources": {"small_fish": 5}},
+        {"name": "🎣 Простая леска+", "yield_bonus_pct": 18, "luck_bonus": 4, "req_level": 8,
+         "recipe_coins": 480, "recipe_resources": {"carp": 12, "trout": 4}},
+        {"name": "🎣 Укреплённая удочка", "yield_bonus_pct": 28, "luck_bonus": 7, "req_level": 15,
+         "recipe_coins": 1100, "recipe_resources": {"trout": 10, "pearl": 5}},
+        {"name": "🎣 Карбоновый спиннинг", "yield_bonus_pct": 38, "luck_bonus": 10, "req_level": 25,
+         "recipe_coins": 2400, "recipe_resources": {"big_catfish": 8, "pearl": 6}},
+        {"name": "🎣 Спиннинг мастера", "yield_bonus_pct": 50, "luck_bonus": 15, "req_level": 35,
+         "recipe_coins": 4400, "recipe_resources": {"river_crystal": 10, "big_catfish": 6}},
+        {"name": "🎣 Кристальная удочка", "yield_bonus_pct": 65, "luck_bonus": 20, "req_level": 50,
+         "recipe_coins": 7800, "recipe_resources": {"turtle_shell": 8, "river_crystal": 10}},
+        {"name": "🎣 Легендарный спиннинг", "yield_bonus_pct": 85, "luck_bonus": 30, "req_level": 70,
+         "recipe_coins": 14500, "recipe_resources": {"golden_fish": 8, "turtle_shell": 8}},
+        {"name": "🎣 Удочка кракена", "yield_bonus_pct": 110, "luck_bonus": 45, "req_level": 90,
+         "recipe_coins": 29000, "recipe_resources": {"kraken_scale": 8, "golden_fish": 8}},
+        {"name": "🌊✨ Священная удочка", "yield_bonus_pct": 140, "luck_bonus": 60, "req_level": 100,
+         "recipe_coins": 58000, "recipe_resources": {"issykkul_pearl": 5, "kraken_scale": 10}},
+    ],
+    "hunting": [
+        {"name": "🗡 Деревянный меч", "yield_bonus_pct": 10, "luck_bonus": 2, "req_level": 1,
+         "recipe_coins": 200, "recipe_resources": {"bone": 3}},
+        {"name": "🗡 Костяное копьё", "yield_bonus_pct": 18, "luck_bonus": 4, "req_level": 8,
+         "recipe_coins": 500, "recipe_resources": {"bone": 12, "leather_hide": 4}},
+        {"name": "⚔️ Железный меч", "yield_bonus_pct": 28, "luck_bonus": 7, "req_level": 15,
+         "recipe_coins": 1200, "recipe_resources": {"leather_hide": 10, "wolf_fang": 3}},
+        {"name": "🏹 Составной лук", "yield_bonus_pct": 38, "luck_bonus": 10, "req_level": 25,
+         "recipe_coins": 2500, "recipe_resources": {"wolf_fang": 10, "eagle_feather": 6}},
+        {"name": "⚔️ Клинок кочевника", "yield_bonus_pct": 50, "luck_bonus": 15, "req_level": 35,
+         "recipe_coins": 4500, "recipe_resources": {"eagle_feather": 12, "ibex_horn": 5}},
+        {"name": "🏹 Лук горного стрелка", "yield_bonus_pct": 65, "luck_bonus": 20, "req_level": 50,
+         "recipe_coins": 8000, "recipe_resources": {"ibex_horn": 10, "snow_pelt": 5}},
+        {"name": "⚔️ Клинок снежного барса", "yield_bonus_pct": 85, "luck_bonus": 30, "req_level": 70,
+         "recipe_coins": 15000, "recipe_resources": {"snow_pelt": 10, "golden_antler": 4}},
+        {"name": "🏹 Лук золотого оленя", "yield_bonus_pct": 110, "luck_bonus": 45, "req_level": 90,
+         "recipe_coins": 30000, "recipe_resources": {"golden_antler": 8, "manas_essence": 4}},
+        {"name": "🐎✨ Клинок духа Манаса", "yield_bonus_pct": 140, "luck_bonus": 60, "req_level": 100,
+         "recipe_coins": 60000, "recipe_resources": {"manas_essence": 8, "golden_antler": 10}},
+    ],
+}
+
+def get_tool_level(user: dict, tool_type: str) -> int:
+    return user.get(f"tool_level_{tool_type}", 0)
+
+def get_current_tool(tool_type: str, level: int) -> dict | None:
+    tiers = TOOL_TIERS[tool_type]
+    if level <= 0 or level > len(tiers):
+        return None
+    return tiers[level - 1]
+
+def do_upgrade_tool(user: dict, tool_type: str) -> tuple[bool, str]:
+    if tool_type not in TOOL_TIERS:
+        return False, "❌ Неизвестный тип инструмента."
+    level = get_tool_level(user, tool_type)
+    tiers = TOOL_TIERS[tool_type]
+    if level >= len(tiers):
+        return False, "✅ Инструмент уже максимального уровня!"
+
+    next_tier = tiers[level]  # tiers[level] = уровень (level+1), т.к. индекс с 0
+    if user["level"] < next_tier["req_level"]:
+        return False, f"❌ Нужен игровой уровень <b>{next_tier['req_level']}</b>."
+    if user["balance"] < next_tier["recipe_coins"]:
+        return False, f"❌ Нужно <b>{next_tier['recipe_coins']}</b> монет."
+
+    resources = get_resources(user)
+    for res_key, need in next_tier["recipe_resources"].items():
+        have = resources.get(res_key, 0)
+        if have < need:
+            res_name = RESOURCES.get(res_key, {}).get("name", res_key)
+            return False, f"❌ Не хватает: {res_name} ({have}/{need})"
+
+    for res_key, need in next_tier["recipe_resources"].items():
+        resources[res_key] -= need
+        if resources[res_key] <= 0:
+            del resources[res_key]
+    save_resources(user["user_id"], resources)
+
+    new_level = level + 1
+    update_user(
+        user["user_id"],
+        balance=user["balance"] - next_tier["recipe_coins"],
+        **{f"tool_level_{tool_type}": new_level},
+    )
+    return True, (
+        f"✅ Инструмент улучшен: <b>{next_tier['name']}</b> (ур. {new_level}/{len(tiers)})!\n"
+        f"📈 Бонус добычи: +{next_tier['yield_bonus_pct']}% | 🍀 удача: +{next_tier['luck_bonus']}"
+    )
+
+def build_tools_text(user: dict) -> str:
+    labels = {"mining": "⛏ Шахта", "fishing": "🎣 Рыбалка", "hunting": "🏹 Охота"}
+    lines = ["🛠 <b>Мастерская — инструменты</b>\n"]
+    for ttype, label in labels.items():
+        level = get_tool_level(user, ttype)
+        tiers = TOOL_TIERS[ttype]
+        current = get_current_tool(ttype, level)
+        lines.append(f"━━━ {label} ━━━")
+        if current:
+            lines.append(f"Текущий: <b>{current['name']}</b> (ур. {level}/{len(tiers)})\n"
+                         f"  Бонус: +{current['yield_bonus_pct']}% добычи, +{current['luck_bonus']} удачи")
+        else:
+            lines.append("Инструмента пока нет.")
+        if level < len(tiers):
+            nxt = tiers[level]
+            res_str = ", ".join(f"{RESOURCES[r]['name']} x{n}" for r, n in nxt["recipe_resources"].items())
+            lock = "" if user["level"] >= nxt["req_level"] else f" 🔒 (нужен {nxt['req_level']} ур.)"
+            lines.append(f"Следующий: <b>{nxt['name']}</b>{lock}\n  Цена: {nxt['recipe_coins']} мон. + {res_str}")
+        else:
+            lines.append("🏆 Максимальный уровень достигнут!")
+        lines.append("")
+    return "\n".join(lines)
+
+def get_tools_keyboard(user: dict) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    labels = {"mining": "⛏ Кирку", "fishing": "🎣 Удочку", "hunting": "🏹 Оружие"}
+    for ttype, label in labels.items():
+        level = get_tool_level(user, ttype)
+        if level < len(TOOL_TIERS[ttype]):
+            builder.button(text=f"⬆️ Улучшить {label}", callback_data=f"tool_upgrade:{ttype}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("мастерская", "крафт", "craft", "инструменты", "мои инструменты")))
+async def txt_tools_menu(message: Message):
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
+    await message.answer(build_tools_text(user), reply_markup=get_tools_keyboard(user))
+
+@dp.callback_query(F.data.startswith("tool_upgrade:"))
+async def cb_tool_upgrade(callback: CallbackQuery):
+    ttype = callback.data.split(":")[1]
+    user = get_user_safe(callback.from_user.id)
+    success, text = do_upgrade_tool(user, ttype)
+    await callback.answer()
+    await callback.message.answer(text)
+    if success:
+        updated = get_user(callback.from_user.id)
+        await callback.message.edit_text(build_tools_text(updated), reply_markup=get_tools_keyboard(updated))
 
 # =====================================================================
 # ТОЧКА ВХОДА
