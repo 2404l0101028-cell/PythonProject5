@@ -334,7 +334,7 @@ JOBS = {
         "branch":      "money",
         "grade":       1,
         "min_level":   1,
-        "min_reward":  30, "max_reward":  48,
+        "min_reward":  30, "max_reward":  95,
         "min_exp":     8,  "max_exp":     14,
         "description": "Разливаешь суп. Монет много, опыта мало.",
         "evolves_to":  "money_2",
@@ -445,16 +445,16 @@ JOBS = {
     "founder_1": {
         "name":        "🌱 Стажёр Фонда выпускников КТУ",
         "branch":      "founder", "grade": 1, "min_level": 1,
-        "min_reward":  25, "max_reward":  40,
-        "min_exp":     25, "max_exp":     40,
+        "min_reward":  30, "max_reward":  60,
+        "min_exp":     30, "max_exp":     60,
         "description": "Ты вернулся с чистого листа, но с опытом за плечами.",
         "evolves_to":  "founder_2", "req_level": 5,
     },
     "founder_2": {
         "name":        "🎓 Куратор международных грантов",
         "branch":      "founder", "grade": 2, "min_level": 5,
-        "min_reward":  60, "max_reward":  90,
-        "min_exp":     60, "max_exp":     90,
+        "min_reward":  90, "max_reward":  120,
+        "min_exp":     90, "max_exp":     120,
         "description": "Раздаёшь гранты и завязываешь нужные связи.",
         "evolves_to":  "founder_3", "req_level": 10,
         "req_skill":   ("communication_level", 3),
@@ -462,8 +462,8 @@ JOBS = {
     "founder_3": {
         "name":        "📊 Советник ректора по стратегии",
         "branch":      "founder", "grade": 3, "min_level": 10,
-        "min_reward":  140, "max_reward": 210,
-        "min_exp":     140, "max_exp":    210,
+        "min_reward":  190, "max_reward": 240,
+        "min_exp":     190, "max_exp":    240,
         "description": "Твоё слово теперь имеет вес в кабинете ректора.",
         "evolves_to":  "founder_4", "req_level": 20,
         "req_skill":   ("management_level", 3),
@@ -472,8 +472,8 @@ JOBS = {
     "founder_4": {
         "name":        "🏛 Директор Фонда развития КТУ",
         "branch":      "founder", "grade": 4, "min_level": 20,
-        "min_reward":  320, "max_reward": 460,
-        "min_exp":     320, "max_exp":    460,
+        "min_reward":  380, "max_reward": 490,
+        "min_exp":     380, "max_exp":    490,
         "description": "Управляешь миллионами сомов на развитие университета.",
         "evolves_to":  "founder_5", "req_level": 35,
         "req_skill":   ("management_level", 5),
@@ -482,8 +482,8 @@ JOBS = {
     "founder_5": {
         "name":        "🕴 Член Попечительского совета",
         "branch":      "founder", "grade": 5, "min_level": 35,
-        "min_reward":  700, "max_reward": 980,
-        "min_exp":     700, "max_exp":    980,
+        "min_reward":  800, "max_reward": 1080,
+        "min_exp":     800, "max_exp":    1080,
         "description": "Решения, определяющие судьбу КТУ на десятилетия.",
         "evolves_to":  "founder_6", "req_level": 50,
         "req_skill":   ("management_level", 7),
@@ -492,8 +492,8 @@ JOBS = {
     "founder_6": {
         "name":        "🕌 Посланник Турции при университете",
         "branch":      "founder", "grade": 6, "min_level": 50,
-        "min_reward":  1400, "max_reward": 1900,
-        "min_exp":     1400, "max_exp":    1900,
+        "min_reward":  1600, "max_reward": 1900,
+        "min_exp":     1600, "max_exp":    1900,
         "description": "Официальный дипломатический статус.",
         "evolves_to":  "founder_7", "req_level": 70,
         "req_skill":   ("management_level", 9),
@@ -502,8 +502,8 @@ JOBS = {
     "founder_7": {
         "name":        "🌍 Почётный профессор трёх континентов",
         "branch":      "founder", "grade": 7, "min_level": 70,
-        "min_reward":  2600, "max_reward": 3400,
-        "min_exp":     2600, "max_exp":    3400,
+        "min_reward":  3000, "max_reward": 3400,
+        "min_exp":     3000, "max_exp":    3400,
         "description": "Твоё имя знают в университетах Азии, Европы и Америки.",
         "evolves_to":  "founder_8", "req_level": 80,
         "req_skill":   ("management_level", 10),
@@ -512,8 +512,8 @@ JOBS = {
     "founder_8": {
         "name":        "👔 Глава ассоциации университетов Центральной Азии",
         "branch":      "founder", "grade": 8, "min_level": 80,
-        "min_reward":  4200, "max_reward": 5600,
-        "min_exp":     4200, "max_exp":    5600,
+        "min_reward":  4800, "max_reward": 5600,
+        "min_exp":     4800, "max_exp":    5600,
         "description": "Под твоим началом десятки вузов региона.",
         "evolves_to":  "founder_9", "req_level": 100,
         "req_skill":   ("management_level", 10),
@@ -532,16 +532,16 @@ JOBS = {
     "science_1": {
         "name":        "🧪 Лаборант кафедры Химии",
         "branch":      "science", "grade": 1, "min_level": 1,
-        "min_reward":  30, "max_reward":  45,
-        "min_exp":     30, "max_exp":     45,
+        "min_reward":  30, "max_reward":  60,
+        "min_exp":     30, "max_exp":     60,
         "description": "Моешь пробирки, но втайне мечтаешь о Нобелевке.",
         "evolves_to":  "science_2", "req_level": 5,
     },
     "science_2": {
         "name":        "🔬 Ассистент профессора на грантовом проекте",
         "branch":      "science", "grade": 2, "min_level": 5,
-        "min_reward":  70, "max_reward":  110,
-        "min_exp":     70, "max_exp":    110,
+        "min_reward":  90, "max_reward":  150,
+        "min_exp":     90, "max_exp":    150,
         "description": "Пишешь отчёты по гранту, который никто не читает.",
         "evolves_to":  "science_3", "req_level": 10,
         "req_skill":   ("communication_level", 3),
@@ -549,8 +549,8 @@ JOBS = {
     "science_3": {
         "name":        "📄 Автор международных публикаций (Scopus)",
         "branch":      "science", "grade": 3, "min_level": 10,
-        "min_reward":  170, "max_reward": 260,
-        "min_exp":     170, "max_exp":    260,
+        "min_reward":  220, "max_reward": 390,
+        "min_exp":     220, "max_exp":    390,
         "description": "Твоё имя теперь можно нагуглить в научной базе.",
         "evolves_to":  "science_4", "req_level": 20,
         "req_skill":   ("management_level", 3),
@@ -559,8 +559,8 @@ JOBS = {
     "science_4": {
         "name":        "🧬 Руководитель лаборатории биотехнологий",
         "branch":      "science", "grade": 4, "min_level": 20,
-        "min_reward":  380, "max_reward": 550,
-        "min_exp":     380, "max_exp":    550,
+        "min_reward":  480, "max_reward": 650,
+        "min_exp":     480, "max_exp":    650,
         "description": "У тебя своя лаборатория и бюджет на реагенты.",
         "evolves_to":  "science_5", "req_level": 35,
         "req_skill":   ("management_level", 5),
@@ -569,8 +569,8 @@ JOBS = {
     "science_5": {
         "name":        "🏅 Обладатель гранта Erasmus+",
         "branch":      "science", "grade": 5, "min_level": 35,
-        "min_reward":  820, "max_reward": 1150,
-        "min_exp":     820, "max_exp":    1150,
+        "min_reward":  920, "max_reward": 1550,
+        "min_exp":     920, "max_exp":    1550,
         "description": "Летаешь между университетами Европы с докладами.",
         "evolves_to":  "science_6", "req_level": 50,
         "req_skill":   ("management_level", 7),
@@ -579,8 +579,8 @@ JOBS = {
     "science_6": {
         "name":        "🛰 Учёный, сотрудничающий с NASA/ESA",
         "branch":      "science", "grade": 6, "min_level": 50,
-        "min_reward":  1650, "max_reward": 2250,
-        "min_exp":     1650, "max_exp":    2250,
+        "min_reward":  1950, "max_reward": 2750,
+        "min_exp":     1950, "max_exp":    2750,
         "description": "Твои расчёты используют в реальных космических миссиях.",
         "evolves_to":  "science_7", "req_level": 70,
         "req_skill":   ("management_level", 9),
@@ -619,16 +619,16 @@ JOBS = {
     "media_1": {
         "name":        "📱 Тиктокер с 100 подписчиками",
         "branch":      "media", "grade": 1, "min_level": 1,
-        "min_reward":  35, "max_reward":  55,
-        "min_exp":     35, "max_exp":     55,
+        "min_reward":  35, "max_reward":  80,
+        "min_exp":     35, "max_exp":     80,
         "description": "Снимаешь ролики в общаге на телефон мамы.",
         "evolves_to":  "media_2", "req_level": 5,
     },
     "media_2": {
         "name":        "🎥 Ведущий студенческого YouTube-канала",
         "branch":      "media", "grade": 2, "min_level": 5,
-        "min_reward":  85, "max_reward":  130,
-        "min_exp":     85, "max_exp":    130,
+        "min_reward":  100, "max_reward":  130,
+        "min_exp":     100, "max_exp":    130,
         "description": "У тебя уже есть штатив и кольцевая лампа.",
         "evolves_to":  "media_3", "req_level": 10,
         "req_skill":   ("communication_level", 4),
@@ -636,8 +636,8 @@ JOBS = {
     "media_3": {
         "name":        "📸 Инстаграм-блогер с рекламными интеграциями",
         "branch":      "media", "grade": 3, "min_level": 10,
-        "min_reward":  200, "max_reward": 310,
-        "min_exp":     200, "max_exp":    310,
+        "min_reward":  200, "max_reward": 410,
+        "min_exp":     200, "max_exp":    410,
         "description": "Рекламодатели пишут первыми.",
         "evolves_to":  "media_4", "req_level": 20,
         "req_skill":   ("management_level", 3),
@@ -646,8 +646,8 @@ JOBS = {
     "media_4": {
         "name":        "🎙 Подкастер с миллионной аудиторией",
         "branch":      "media", "grade": 4, "min_level": 20,
-        "min_reward":  450, "max_reward": 650,
-        "min_exp":     450, "max_exp":    650,
+        "min_reward":  650, "max_reward": 850,
+        "min_exp":     650, "max_exp":    850,
         "description": "У тебя студия звукозаписи прямо в квартире.",
         "evolves_to":  "media_5", "req_level": 35,
         "req_skill":   ("management_level", 5),
@@ -656,8 +656,8 @@ JOBS = {
     "media_5": {
         "name":        "📺 Ведущий национального телешоу",
         "branch":      "media", "grade": 5, "min_level": 35,
-        "min_reward":  980, "max_reward": 1350,
-        "min_exp":     980, "max_exp":    1350,
+        "min_reward":  1080, "max_reward": 1550,
+        "min_exp":     1080, "max_exp":    1550,
         "description": "Тебя узнают таксисты и продавцы на базаре.",
         "evolves_to":  "media_6", "req_level": 50,
         "req_skill":   ("management_level", 7),
@@ -666,8 +666,8 @@ JOBS = {
     "media_6": {
         "name":        "🌐 Основатель медиахолдинга",
         "branch":      "media", "grade": 6, "min_level": 50,
-        "min_reward":  1950, "max_reward": 2650,
-        "min_exp":     1950, "max_exp":    2650,
+        "min_reward":  2050, "max_reward": 2950,
+        "min_exp":     2050, "max_exp":    2950,
         "description": "У тебя своя сеть каналов и редакция.",
         "evolves_to":  "media_7", "req_level": 70,
         "req_skill":   ("management_level", 9),
@@ -676,8 +676,8 @@ JOBS = {
     "media_7": {
         "name":        "🎬 Продюсер международных проектов",
         "branch":      "media", "grade": 7, "min_level": 70,
-        "min_reward":  3500, "max_reward": 4700,
-        "min_exp":     3500, "max_exp":    4700,
+        "min_reward":  3500, "max_reward": 5000,
+        "min_exp":     3500, "max_exp":    5000,
         "description": "Твои проекты показывают за пределами Кыргызстана.",
         "evolves_to":  "media_8", "req_level": 80,
         "req_skill":   ("management_level", 10),
@@ -686,8 +686,8 @@ JOBS = {
     "media_8": {
         "name":        "🏆 Обладатель премии «Золотой микрофон»",
         "branch":      "media", "grade": 8, "min_level": 80,
-        "min_reward":  5600, "max_reward": 7500,
-        "min_exp":     5600, "max_exp":    7500,
+        "min_reward":  6000, "max_reward": 8000,
+        "min_exp":     6000, "max_exp":    8000,
         "description": "Награда за вклад в медиаиндустрию региона.",
         "evolves_to":  "media_9", "req_level": 100,
         "req_skill":   ("management_level", 10),
@@ -696,8 +696,8 @@ JOBS = {
     "media_9": {
         "name":        "👑 Медиамагнат, чьё лицо знает вся Центральная Азия",
         "branch":      "media", "grade": 9, "min_level": 100,
-        "min_reward":  11000, "max_reward": 16500,
-        "min_exp":     11000, "max_exp":    16500,
+        "min_reward":  12000, "max_reward": 18000,
+        "min_exp":     12000, "max_exp":    18000,
         "description": "Твоё имя — синоним слова «медиа» в регионе.",
         "evolves_to":  None,
         "special":     "media_king",
@@ -706,16 +706,16 @@ JOBS = {
     "politics_1": {
         "name":        "🗳 Волонтёр на выборах в студсовет",
         "branch":      "politics", "grade": 1, "min_level": 1,
-        "min_reward":  40, "max_reward":  65,
-        "min_exp":     40, "max_exp":     65,
+        "min_reward":  40, "max_reward":  90,
+        "min_exp":     40, "max_exp":     90,
         "description": "Раздаёшь листовки у главного корпуса.",
         "evolves_to":  "politics_2", "req_level": 5,
     },
     "politics_2": {
         "name":        "📋 Депутат студенческого парламента",
         "branch":      "politics", "grade": 2, "min_level": 5,
-        "min_reward":  100, "max_reward": 150,
-        "min_exp":     100, "max_exp":    150,
+        "min_reward":  150, "max_reward": 250,
+        "min_exp":     150, "max_exp":    250,
         "description": "Первая должность на пути к большой политике.",
         "evolves_to":  "politics_3", "req_level": 10,
         "req_skill":   ("communication_level", 4),
@@ -723,8 +723,8 @@ JOBS = {
     "politics_3": {
         "name":        "🏢 Помощник депутата Жогорку Кенеша",
         "branch":      "politics", "grade": 3, "min_level": 10,
-        "min_reward":  230, "max_reward": 350,
-        "min_exp":     230, "max_exp":    350,
+        "min_reward":  330, "max_reward": 450,
+        "min_exp":     330, "max_exp":    450,
         "description": "Носишь папки и учишься закулисной игре.",
         "evolves_to":  "politics_4", "req_level": 20,
         "req_skill":   ("management_level", 3),
@@ -733,8 +733,8 @@ JOBS = {
     "politics_4": {
         "name":        "🎖 Депутат Жогорку Кенеша",
         "branch":      "politics", "grade": 4, "min_level": 20,
-        "min_reward":  520, "max_reward": 750,
-        "min_exp":     520, "max_exp":    750,
+        "min_reward":  620, "max_reward": 950,
+        "min_exp":     620, "max_exp":    950,
         "description": "У тебя своё кресло в парламенте.",
         "evolves_to":  "politics_5", "req_level": 35,
         "req_skill":   ("management_level", 5),
@@ -743,8 +743,8 @@ JOBS = {
     "politics_5": {
         "name":        "🏛 Министр образования",
         "branch":      "politics", "grade": 5, "min_level": 35,
-        "min_reward":  1120, "max_reward": 1550,
-        "min_exp":     1120, "max_exp":    1550,
+        "min_reward":  1520, "max_reward": 2050,
+        "min_exp":     1520, "max_exp":    2050,
         "description": "Наконец-то можешь изменить систему изнутри.",
         "evolves_to":  "politics_6", "req_level": 50,
         "req_skill":   ("management_level", 7),
@@ -753,8 +753,8 @@ JOBS = {
     "politics_6": {
         "name":        "🕴 Вице-премьер-министр",
         "branch":      "politics", "grade": 6, "min_level": 50,
-        "min_reward":  2250, "max_reward": 3050,
-        "min_exp":     2250, "max_exp":    3050,
+        "min_reward":  2550, "max_reward": 3250,
+        "min_exp":     2550, "max_exp":    3250,
         "description": "Второй человек в правительстве страны.",
         "evolves_to":  "politics_7", "req_level": 70,
         "req_skill":   ("management_level", 9),
@@ -763,8 +763,8 @@ JOBS = {
     "politics_7": {
         "name":        "🌍 Полномочный представитель в ООН",
         "branch":      "politics", "grade": 7, "min_level": 70,
-        "min_reward":  4000, "max_reward": 5400,
-        "min_exp":     4000, "max_exp":    5400,
+        "min_reward":  5000, "max_reward": 6400,
+        "min_exp":     5000, "max_exp":    6400,
         "description": "Твой голос звучит на мировой арене.",
         "evolves_to":  "politics_8", "req_level": 80,
         "req_skill":   ("management_level", 10),
@@ -773,8 +773,8 @@ JOBS = {
     "politics_8": {
         "name":        "🏆 Премьер-министр Кыргызской Республики",
         "branch":      "politics", "grade": 8, "min_level": 80,
-        "min_reward":  6400, "max_reward": 8600,
-        "min_exp":     6400, "max_exp":    8600,
+        "min_reward":  6700, "max_reward": 9600,
+        "min_exp":     6700, "max_exp":    9600,
         "description": "Управляешь всей страной.",
         "evolves_to":  "politics_9", "req_level": 100,
         "req_skill":   ("management_level", 10),
@@ -783,8 +783,8 @@ JOBS = {
     "politics_9": {
         "name":        "👑 Президент Кыргызской Республики",
         "branch":      "politics", "grade": 9, "min_level": 100,
-        "min_reward":  12500, "max_reward": 19000,
-        "min_exp":     12500, "max_exp":    19000,
+        "min_reward":  15000, "max_reward": 20000,
+        "min_exp":     15000, "max_exp":    20000,
         "description": "Вершина пути. Ты — Президент.",
         "evolves_to":  None,
         "special":     "politics_king",
@@ -983,49 +983,49 @@ ASCENSION_UPGRADES = {
     "coin_boost": {
         "name": "💰 Печать Вознесения (монеты)",
         "label": "монеты",
-        "base_cost": 10, "cost_growth": 8,   # цена след. уровня = base_cost + level*cost_growth
-        "max_level": 20,
-        "per_level_bonus": 1,   # +1% к монетам за уровень
+        "base_cost": 12, "cost_growth": 9,
+        "max_level": 30,
+        "per_level_bonus": 5,   # +5% к монетам за уровень → максимум +150%
         "description": "Перманентный бонус к заработку. Не сбрасывается перерождением.",
     },
     "xp_boost": {
         "name": "✨ Печать Вознесения (опыт)",
         "label": "опыт",
-        "base_cost": 10, "cost_growth": 8,
-        "max_level": 20,
-        "per_level_bonus": 1,
+        "base_cost": 12, "cost_growth": 9,
+        "max_level": 30,
+        "per_level_bonus": 5,   # максимум +150%
         "description": "Перманентный бонус к опыту. Не сбрасывается перерождением.",
     },
     "luck_boost": {
         "name": "🍀 Печать Вознесения (удача)",
         "label": "удача",
-        "base_cost": 15, "cost_growth": 10,
-        "max_level": 15,
-        "per_level_bonus": 1,
+        "base_cost": 18, "cost_growth": 12,
+        "max_level": 20,
+        "per_level_bonus": 3,   # максимум +60 удачи
         "description": "Перманентная удача. Не сбрасывается перерождением.",
     },
     "energy_cap": {
         "name": "🔋 Ядро выносливости",
         "label": "макс. энергия",
-        "base_cost": 20, "cost_growth": 12,
-        "max_level": 10,
-        "per_level_bonus": 20,   # +20 к максимуму энергии за уровень
+        "base_cost": 22, "cost_growth": 14,
+        "max_level": 15,
+        "per_level_bonus": 50,  # максимум +750 к максимуму энергии
         "description": "Увеличивает максимум энергии перманентно.",
     },
     "hp_cap": {
         "name": "❤️ Ядро жизни",
         "label": "макс. HP",
-        "base_cost": 20, "cost_growth": 12,
-        "max_level": 10,
-        "per_level_bonus": 20,
+        "base_cost": 22, "cost_growth": 14,
+        "max_level": 15,
+        "per_level_bonus": 50,  # максимум +750 к максимуму HP
         "description": "Увеличивает максимум здоровья перманентно.",
     },
     "start_capital": {
         "name": "🏦 Наследный капитал",
         "label": "стартовый баланс",
-        "base_cost": 25, "cost_growth": 15,
-        "max_level": 10,
-        "per_level_bonus": 100,   # +100 к стартовым монетам при перерождении, за уровень
+        "base_cost": 28, "cost_growth": 16,
+        "max_level": 15,
+        "per_level_bonus": 500,  # максимум +7500 к стартовым монетам при перерождении
         "description": "Увеличивает стартовый капитал при каждом перерождении.",
     },
 }
@@ -1435,37 +1435,53 @@ BOSS_ITEMS = {
     },
 }
 
+BOSS_ITEM_BONUS_LABELS = {
+    "coins": "💰 монеты с работы",
+    "xp":    "✨ опыт с работы",
+    "luck":  "🍀 удача",
+    "both":  "💰 монеты И ✨ опыт с работы",
+}
+
+def get_boss_item_bonus_text(item_key: str, level: int = 1) -> str:
+    """Возвращает понятную строку бонуса предмета с учётом уровня улучшения."""
+    item = BOSS_ITEMS.get(item_key)
+    if not item:
+        return ""
+    bonus = item["base_bonus"] + (level - 1) * max(1, item["base_bonus"] // 4)
+    label = BOSS_ITEM_BONUS_LABELS.get(item["bonus_type"], "бонус")
+    return f"+{bonus}% к {label}"
+
 RARITY_ORDER = ["common", "rare", "epic", "legendary"]
 
 VEHICLES = {
     "bicycle": {
         "name": "🚲 Велосипед активиста",
-        "price": 8000, "xp_per_hour": 30, "min_level": 40,
+        "price": 8000, "xp_per_hour": 300, "min_level": 40,
         "description": "Катаешься между корпусами и незаметно набираешься опыта.",
     },
     "moped": {
         "name": "🛵 Мопед курьера",
-        "price": 20000, "xp_per_hour": 70, "min_level": 45,
+        "price": 20000, "xp_per_hour": 700, "min_level": 45,
         "description": "Развозишь заказы и попутно учишься на ходу.",
     },
     "sedan": {
         "name": "🚗 Подержанный седан",
-        "price": 45000, "xp_per_hour": 150, "min_level": 55,
+        "price": 45000, "xp_per_hour": 1500, "min_level": 55,
         "description": "Слушаешь аудиокниги по дороге на пары.",
     },
     "suv": {
         "name": "🚙 Внедорожник",
-        "price": 90000, "xp_per_hour": 300, "min_level": 65,
+        "price": 90000, "xp_per_hour": 3000, "min_level": 65,
         "description": "Возишь профессоров на конференции — знания сами липнут.",
     },
     "sportscar": {
         "name": "🏎 Спорткар",
-        "price": 200000, "xp_per_hour": 600, "min_level": 80,
+        "price": 200000, "xp_per_hour": 6000, "min_level": 80,
         "description": "Статус привлекает нужных людей и нужные знания.",
     },
     "private_jet": {
         "name": "✈️ Личный самолёт",
-        "price": 500000, "xp_per_hour": 1200, "min_level": 100,
+        "price": 500000, "xp_per_hour": 15000, "min_level": 100,
         "description": "Летаешь на конференции по всему миру.",
     },
 }
@@ -9850,10 +9866,19 @@ def do_fight_boss(user: dict, boss_key: str) -> tuple[bool, str]:
         item = BOSS_ITEMS[dropped_key]
         if dropped_key in items:
             items[dropped_key] += 1
-            item_line = f"\n\n🎁 Дубликат: <b>{item['name']}</b> {item['rarity_label']}\nУровень предмета: <b>{items[dropped_key]}</b> (улучшен автоматически до макс. полученного уровня)"
+            bonus_text = get_boss_item_bonus_text(dropped_key, items[dropped_key])
+            item_line = (
+                f"\n\n🎁 Дубликат: <b>{item['name']}</b> {item['rarity_label']}\n"
+                f"Уровень предмета: <b>{items[dropped_key]}</b> (даёт {bonus_text})"
+            )
         else:
             items[dropped_key] = 1
-            item_line = f"\n\n🎁 <b>НОВЫЙ ПРЕДМЕТ!</b>\n{item['name']} {item['rarity_label']}\n<i>{item['description']}</i>"
+            bonus_text = get_boss_item_bonus_text(dropped_key, 1)
+            item_line = (
+                f"\n\n🎁 <b>НОВЫЙ ПРЕДМЕТ!</b>\n{item['name']} {item['rarity_label']}\n"
+                f"🎁 Даёт: <b>{bonus_text}</b>\n"
+                f"<i>{item['description']}</i>"
+            )
             if not user.get("equipped_boss_item"):
                 update_user(user["user_id"], equipped_boss_item=dropped_key)
                 item_line += "\n🔧 Автоматически экипирован (первый предмет)."
@@ -9956,10 +9981,17 @@ def build_inventory_text(user: dict) -> str:
         item = BOSS_ITEMS[key]
         mark = " ◀ экипирован" if key == equipped else ""
         cost = item["upgrade_cost_base"] * level
+        bonus_text = get_boss_item_bonus_text(key, level)
         lines.append(
             f"{'✅' if key == equipped else '•'} <b>{item['name']}</b> {item['rarity_label']}{mark}\n"
+            f"  🎁 Даёт: <b>{bonus_text}</b>\n"
+            f"  <i>{item['description']}</i>\n"
             f"  Уровень: {level} | Улучшение: {cost} 🔶"
         )
+    lines.append(
+        "\n<i>Экипировать можно только ОДИН предмет одновременно — "
+        "выбирай тот, чей бонус тебе нужнее.</i>"
+    )
     return "\n\n".join(lines)
 
 
@@ -11084,6 +11116,14 @@ def get_location_bosses_keyboard(user: dict) -> "InlineKeyboardMarkup":
     builder.adjust(1)
     return builder.as_markup()
 
+def get_location_item_bonus_text(item_key: str, level: int = 1) -> str:
+    item = LOCATION_BOSS_ITEMS.get(item_key)
+    if not item:
+        return ""
+    yield_pct = item["yield_bonus_pct"] + (level - 1) * 3
+    luck = item["luck_bonus"] + (level - 1) * 2
+    return f"+{yield_pct}% к добыче, +{luck} удачи (только в своей стихии)"
+
 
 # =====================================================================
 # ХЕНДЛЕРЫ
@@ -11217,7 +11257,12 @@ async def txt_location_items(message: Message):
         it = LOCATION_BOSS_ITEMS[k]
         mark = " ◀ экипирован" if k == equipped else ""
         cost = it["upgrade_cost_base"] * level
-        lines.append(f"{'✅' if k == equipped else '•'} {it['name']} {it['rarity_label']}{mark}\n  Уровень {level} | Апгрейд: {cost} 🔶")
+        bonus_text = get_location_item_bonus_text(k, level)
+        lines.append(
+            f"{'✅' if k == equipped else '•'} {it['name']} {it['rarity_label']}{mark}\n"
+            f"  🎁 Даёт: {bonus_text}\n"
+            f"  Уровень {level} | Апгрейд: {cost} 🔶"
+        )
         builder.button(text=f"🔧 {it['name'][:20]}", callback_data=f"equip_locitem:{k}")
         builder.button(text=f"⬆️ Улучшить {it['name'][:15]}", callback_data=f"upgrade_locitem:{k}")
     builder.adjust(1)
