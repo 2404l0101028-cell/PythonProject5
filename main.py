@@ -48,7 +48,7 @@ REBIRTH_STARTER_JOBS = {
 }
 
 ASCENSION_CRYSTALS_BASE   = 50   # кристаллов за 1-е перерождение
-ASCENSION_CRYSTALS_PER    = 25   # + за каждое следующее перерождение
+ASCENSION_CRYSTALS_PER    = 100   # + за каждое следующее перерождение
 ASCENSION_GACHA_PRICE     = 30   # кристаллов за 1 круть гачи
 
 # =====================================================================
@@ -1452,6 +1452,361 @@ def get_boss_item_bonus_text(item_key: str, level: int = 1) -> str:
     return f"+{bonus}% к {label}"
 
 RARITY_ORDER = ["common", "rare", "epic", "legendary"]
+
+# =====================================================================
+# МИРОВЫЕ БОССЫ
+# =====================================================================
+import json as _json_wb
+
+WORLD_BOSSES = {
+    "khan_specter": {
+        "name": "👻 Дух Хана Степи", "emoji": "👻",
+        "max_hp": 500000, "min_level": 15,
+        "attack_energy_cost": 25, "attack_cooldown": 1800, "duration_hours": 12,
+        "description": "Древний дух пробудился в степях под Бишкеком. Собери всех студентов, чтобы одолеть его!",
+        "win_text": "Общими усилиями студенты КТУ изгнали дух хана обратно в степь!",
+        "escape_text": "Дух хана слишком силён — он растворился в степи.",
+        "reward_coin_mult": 3.0, "reward_exp_mult": 3.0, "top_bonus_pct": 50,
+    },
+    "manas_avatar": {
+        "name": "🐎 Аватар Манаса", "emoji": "🐎",
+        "max_hp": 2000000, "min_level": 40,
+        "attack_energy_cost": 35, "attack_cooldown": 2400, "duration_hours": 18,
+        "description": "Дух великого эпоса воплотился, чтобы испытать новое поколение.",
+        "win_text": "Аватар Манаса склонил голову перед объединённой мощью студентов!",
+        "escape_text": "Аватар Манаса счёл вас недостойными и растворился в свете.",
+        "reward_coin_mult": 5.0, "reward_exp_mult": 5.0, "top_bonus_pct": 75,
+    },
+    "gak_overlord": {
+        "name": "👁 Верховная Комиссия ГАК", "emoji": "👁",
+        "max_hp": 5000000, "min_level": 70,
+        "attack_energy_cost": 45, "attack_cooldown": 3000, "duration_hours": 24,
+        "description": "Финальный экзамен для всего университета сразу.",
+        "win_text": "Комиссия единогласно поставила всем «отлично». Легендарная победа!",
+        "escape_text": "Комиссия перенесла защиту на следующий семестр...",
+        "reward_coin_mult": 8.0, "reward_exp_mult": 8.0, "top_bonus_pct": 100,
+    },
+    "boss_kyraata": {
+        "name": "🐻 Босс Кыраата", "emoji": "🐻",
+        "max_hp": 1000000, "min_level": 20,
+        "attack_energy_cost": 30, "attack_cooldown": 2000, "duration_hours": 14,
+        "description": "Босс Кыраата захватил весь кыраат, спаси кыраат от него!",
+        "win_text": "Общими усилиями студенты КТУ изгнали Босса Кыраата обратно в кладовку Кыраата!",
+        "escape_text": "Босс Кыраата слишком силён — он ушел... но он вернеться.",
+        "reward_coin_mult": 4.0, "reward_exp_mult": 4.0, "top_bonus_pct": 60,
+    },
+}
+
+
+def get_active_world_boss() -> dict | None:
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM world_boss WHERE status = 'active' ORDER BY id DESC LIMIT 1")
+            row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def get_world_boss_by_id(boss_id: int) -> dict | None:
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM world_boss WHERE id = %s", (boss_id,))
+            row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def save_world_boss(boss_id: int, **kwargs):
+    if not kwargs:
+        return
+    fields = ", ".join(f"{k} = %s" for k in kwargs)
+    values = list(kwargs.values()) + [boss_id]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"UPDATE world_boss SET {fields} WHERE id = %s", values)
+            conn.commit()
+
+
+def spawn_world_boss(boss_key: str) -> dict | None:
+    cfg = WORLD_BOSSES.get(boss_key)
+    if not cfg:
+        return None
+    existing = get_active_world_boss()
+    if existing and existing["current_hp"] > 0 and int(time.time()) <= existing["ends_at"]:
+        return None
+    now = int(time.time())
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO world_boss (boss_key, max_hp, current_hp, started_at, ends_at, participants, status)
+                   VALUES (%s, %s, %s, %s, %s, '{}', 'active') RETURNING id""",
+                (boss_key, cfg["max_hp"], cfg["max_hp"], now, now + cfg["duration_hours"] * 3600)
+            )
+            new_id = cur.fetchone()[0]
+            conn.commit()
+    return get_world_boss_by_id(new_id)
+
+
+def get_wb_participants(boss: dict) -> dict:
+    try:
+        return _json_wb.loads(boss.get("participants", "") or "{}")
+    except Exception:
+        return {}
+
+
+def calc_world_boss_damage(user: dict) -> int:
+    base = (user.get("agility", 1) + user.get("endurance", 1) +
+            user.get("charisma", 1) + user.get("intellect", 1)) * 3
+    luck_bonus = get_total_luck(user) * 3
+    level_bonus = user["level"] * 2
+    roll = random.randint(1, 100)
+    return base + luck_bonus + level_bonus + roll
+
+
+async def resolve_world_boss(boss: dict, defeated: bool):
+    cfg = WORLD_BOSSES.get(boss["boss_key"])
+    save_world_boss(boss["id"], status="defeated" if defeated else "escaped")
+    if not cfg:
+        return
+    participants = get_wb_participants(boss)
+    if not participants:
+        text = f"⏰ <b>{cfg['name']}</b> исчез — никто не успел вступить в бой."
+        for chat_id in list(registered_chats):
+            try:
+                await bot.send_message(chat_id, text)
+            except Exception:
+                pass
+        return
+
+    total_damage = sum(p.get("damage", 0) for p in participants.values())
+    top_uid, top_data = max(participants.items(), key=lambda x: x[1].get("damage", 0))
+    result_mult = 1.0 if defeated else 0.3
+
+    for uid_str, pdata in participants.items():
+        uid = int(uid_str)
+        dmg = pdata.get("damage", 0)
+        if total_damage <= 0 or dmg <= 0:
+            continue
+        share = dmg / total_damage
+        base_coins = max(20, int(cfg["max_hp"] * cfg["reward_coin_mult"] * share * 0.01 * result_mult))
+        base_exp = max(10, int(cfg["max_hp"] * cfg["reward_exp_mult"] * share * 0.01 * result_mult))
+
+        u = get_user(uid)
+        if not u:
+            continue
+        is_top = (uid_str == top_uid)
+        if is_top:
+            base_coins = int(base_coins * (1 + cfg["top_bonus_pct"] / 100))
+            base_exp = int(base_exp * (1 + cfg["top_bonus_pct"] / 100))
+
+        coins = apply_full_coin_bonus(u, base_coins)
+        exp = apply_combined_xp_bonus(u, base_exp)
+        update_user(uid, balance=u["balance"] + coins, exp=u["exp"] + exp)
+        contribute_faculty_points(uid, max(5, dmg // 1000))
+        fresh = get_user(uid)
+        if fresh:
+            auto_level_up(fresh)
+            check_and_grant_achievements(fresh)
+
+        try:
+            crown = " 👑 (лучший урон!)" if is_top else ""
+            await bot.send_message(
+                uid,
+                f"{'🏆' if defeated else '💨'} <b>{cfg['name']} {'повержен' if defeated else 'сбежал'}!</b>{crown}\n\n"
+                f"⚔️ Твой урон: <b>{dmg}</b> ({share*100:.1f}%)\n"
+                f"💰 Награда: +{coins} монет\n✨ Опыт: +{exp}"
+            )
+        except Exception:
+            pass
+
+    top_name = (get_user(int(top_uid)) or {}).get("username") or top_uid
+    summary = (
+        f"{'🏆 <b>МИРОВОЙ БОСС ПОВЕРЖЕН!</b>' if defeated else '💨 <b>Мировой босс сбежал...</b>'}\n\n"
+        f"{cfg['name']}\n<i>{cfg['win_text'] if defeated else cfg['escape_text']}</i>\n\n"
+        f"👥 Участников: <b>{len(participants)}</b>\n"
+        f"💥 Общий урон: <b>{total_damage}</b> / {cfg['max_hp']}\n"
+        f"👑 Лучший урон: <b>{top_name}</b> ({top_data.get('damage', 0)})\n\n"
+        f"🎁 Награды разосланы всем участникам в личные сообщения!"
+    )
+    for chat_id in list(registered_chats):
+        try:
+            await bot.send_message(chat_id, summary)
+        except Exception:
+            pass
+
+
+def do_attack_world_boss_sync(user: dict, boss: dict) -> tuple[bool, str, bool]:
+    cfg = WORLD_BOSSES.get(boss["boss_key"])
+    if not cfg:
+        return False, "❌ Ошибка данных босса.", False
+    if user["level"] < cfg["min_level"]:
+        return False, f"❌ Нужен уровень <b>{cfg['min_level']}</b>.", False
+    if is_incapacitated(user):
+        return False, get_incapacitated_message(user), False
+
+    participants = get_wb_participants(boss)
+    uid_str = str(user["user_id"])
+    pdata = participants.get(uid_str, {"damage": 0, "last_attack": 0})
+    now = int(time.time())
+    elapsed = now - pdata.get("last_attack", 0)
+    if elapsed < cfg["attack_cooldown"]:
+        remaining = cfg["attack_cooldown"] - elapsed
+        return False, f"⏳ Атаковать снова можно через <b>{remaining // 60}</b> мин.", False
+
+    energy_cost = apply_energy_discount(cfg["attack_energy_cost"])
+    if user["energy"] < energy_cost:
+        return False, f"😴 Недостаточно энергии! Нужно {energy_cost} ⚡.", False
+
+    new_energy = max(0, user["energy"] - energy_cost)
+    update_user(user["user_id"], energy=new_energy)
+
+    damage = calc_world_boss_damage(user)
+    pdata["damage"] = pdata.get("damage", 0) + damage
+    pdata["last_attack"] = now
+    participants[uid_str] = pdata
+
+    new_hp = max(0, boss["current_hp"] - damage)
+    save_world_boss(boss["id"], current_hp=new_hp, participants=_json_wb.dumps(participants))
+    change_reputation(user["user_id"], +1)
+
+    defeated_now = new_hp <= 0
+    hp_pct = int(new_hp / cfg["max_hp"] * 100)
+    text = (
+        f"⚔️ Ты атаковал <b>{cfg['name']}</b>!\n\n"
+        f"💥 Урон: <b>{damage}</b>\n"
+        f"❤️ HP босса: <b>{new_hp}</b> / {cfg['max_hp']} ({hp_pct}%)\n"
+        f"⚡ Энергия: <b>{new_energy}</b> (-{energy_cost})"
+    )
+    return True, text, defeated_now
+
+
+def build_world_boss_text(boss: dict | None) -> str:
+    if not boss:
+        return "😴 Сейчас нет активного мирового босса. Ожидайте появления!"
+    cfg = WORLD_BOSSES.get(boss["boss_key"])
+    if not cfg:
+        return "⚠️ Ошибка данных босса."
+    participants = get_wb_participants(boss)
+    hp_pct = max(0, int(boss["current_hp"] / cfg["max_hp"] * 100))
+    bar = "█" * (hp_pct // 5) + "░" * (20 - hp_pct // 5)
+    remaining = max(0, boss["ends_at"] - int(time.time()))
+    h, m = remaining // 3600, (remaining % 3600) // 60
+    return (
+        f"{cfg['emoji']} <b>{cfg['name']}</b>\n\n<i>{cfg['description']}</i>\n\n"
+        f"❤️ HP: [{bar}] {hp_pct}%\n   {boss['current_hp']} / {cfg['max_hp']}\n\n"
+        f"👥 Атаковало: <b>{len(participants)}</b> игроков\n"
+        f"⏳ Осталось: <b>{h}ч {m}мин</b>\n\n"
+        f"🔒 Мин. уровень: {cfg['min_level']} | ⚡ {cfg['attack_energy_cost']} за атаку"
+    )
+
+
+@dp.message(Command("world_boss"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("мировой босс", "мб", "world boss")))
+async def cmd_world_boss(message: Message):
+    boss = get_active_world_boss()
+    if boss and (int(time.time()) > boss["ends_at"] or boss["current_hp"] <= 0):
+        await resolve_world_boss(boss, defeated=boss["current_hp"] <= 0)
+        boss = None
+    builder = InlineKeyboardBuilder()
+    if boss:
+        builder.button(text="⚔️ Атаковать!", callback_data=f"wb_attack:{boss['id']}")
+    await message.answer(build_world_boss_text(boss), reply_markup=builder.as_markup() if boss else None)
+
+
+@dp.callback_query(F.data.startswith("wb_attack:"))
+async def cb_world_boss_attack(callback: CallbackQuery):
+    boss_id = int(callback.data.split(":")[1])
+    boss = get_world_boss_by_id(boss_id)
+    if not boss or boss["status"] != "active":
+        await callback.answer("Этот босс уже недоступен.", show_alert=True)
+        return
+    if int(time.time()) > boss["ends_at"] or boss["current_hp"] <= 0:
+        await callback.answer()
+        await resolve_world_boss(boss, defeated=boss["current_hp"] <= 0)
+        await callback.message.edit_text(build_world_boss_text(None))
+        return
+
+    user = get_user_safe(callback.from_user.id)
+    success, text, defeated_now = do_attack_world_boss_sync(user, boss)
+    await callback.answer()
+    await callback.message.answer(text)
+
+    if success and defeated_now:
+        fresh_boss = get_world_boss_by_id(boss_id)
+        await resolve_world_boss(fresh_boss, defeated=True)
+        await callback.message.edit_text(build_world_boss_text(None))
+    elif success:
+        updated_boss = get_world_boss_by_id(boss_id)
+        builder = InlineKeyboardBuilder()
+        builder.button(text="⚔️ Атаковать!", callback_data=f"wb_attack:{boss_id}")
+        try:
+            await callback.message.edit_text(build_world_boss_text(updated_boss), reply_markup=builder.as_markup())
+        except Exception:
+            pass
+
+
+@dp.message(Command("spawn_world_boss"))
+async def cmd_spawn_world_boss(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+    parts = message.text.strip().split()
+    if len(parts) != 2 or parts[1] not in WORLD_BOSSES:
+        keys = "\n".join(f"  <code>{k}</code> — {v['name']}" for k, v in WORLD_BOSSES.items())
+        await message.answer(f"❌ Формат: <code>/spawn_world_boss ключ</code>\n\n{keys}")
+        return
+    boss = spawn_world_boss(parts[1])
+    if not boss:
+        await message.answer("⚠️ Уже есть активный мировой босс!")
+        return
+    cfg = WORLD_BOSSES[parts[1]]
+    text = (
+        f"🚨 <b>ПОЯВИЛСЯ МИРОВОЙ БОСС!</b>\n\n{cfg['emoji']} <b>{cfg['name']}</b>\n<i>{cfg['description']}</i>\n\n"
+        f"❤️ HP: <b>{cfg['max_hp']}</b>\n⏳ Время на бой: <b>{cfg['duration_hours']}ч</b>\n\n"
+        f"Пишите <b>мировой босс</b>, чтобы атаковать!"
+    )
+    for chat_id in list(registered_chats):
+        try:
+            await bot.send_message(chat_id, text)
+        except Exception:
+            pass
+    await message.answer(f"✅ Босс {cfg['name']} заспавнен и разослан по чатам.")
+
+
+@dp.message(Command("end_world_boss"))
+async def cmd_end_world_boss(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+    boss = get_active_world_boss()
+    if not boss:
+        await message.answer("❌ Нет активного мирового босса.")
+        return
+    await resolve_world_boss(boss, defeated=boss["current_hp"] <= 0)
+    await message.answer("✅ Мировой босс завершён вручную.")
+
+
+async def auto_world_boss_scheduler():
+    await asyncio.sleep(30)
+    while True:
+        boss = get_active_world_boss()
+        if boss and (int(time.time()) > boss["ends_at"] or boss["current_hp"] <= 0):
+            await resolve_world_boss(boss, defeated=boss["current_hp"] <= 0)
+            boss = None
+        if not boss and random.random() < 0.10:
+            key = random.choice(list(WORLD_BOSSES.keys()))
+            new_boss = spawn_world_boss(key)
+            if new_boss:
+                cfg = WORLD_BOSSES[key]
+                text = (
+                    f"🚨 <b>ПОЯВИЛСЯ МИРОВОЙ БОСС!</b>\n\n{cfg['emoji']} <b>{cfg['name']}</b>\n<i>{cfg['description']}</i>\n\n"
+                    f"❤️ HP: <b>{cfg['max_hp']}</b>\n⏳ Время на бой: <b>{cfg['duration_hours']}ч</b>\n\n"
+                    f"Пишите <b>мировой босс</b>, чтобы атаковать!"
+                )
+                for chat_id in list(registered_chats):
+                    try:
+                        await bot.send_message(chat_id, text)
+                    except Exception:
+                        pass
+        await asyncio.sleep(1800)
 
 VEHICLES = {
     "bicycle": {
@@ -3037,6 +3392,56 @@ def init_db():
                         )
                             )
                         ''')
+            cur.execute("""
+                        CREATE TABLE IF NOT EXISTS faculties
+                        (
+                            faculty_key
+                            TEXT
+                            PRIMARY
+                            KEY,
+                            points
+                            BIGINT
+                            DEFAULT
+                            0
+                        )
+                        """)
+            cur.execute("""
+                        CREATE TABLE IF NOT EXISTS world_boss
+                        (
+                            id
+                            SERIAL
+                            PRIMARY
+                            KEY,
+                            boss_key
+                            TEXT
+                            NOT
+                            NULL,
+                            max_hp
+                            BIGINT
+                            NOT
+                            NULL,
+                            current_hp
+                            BIGINT
+                            NOT
+                            NULL,
+                            started_at
+                            INTEGER
+                            NOT
+                            NULL,
+                            ends_at
+                            INTEGER
+                            NOT
+                            NULL,
+                            participants
+                            TEXT
+                            DEFAULT
+                            '{}',
+                            status
+                            TEXT
+                            DEFAULT
+                            'active'
+                        )
+                        """)
 
             for col, definition in [
                 ("username", "TEXT DEFAULT ''"),
@@ -3109,6 +3514,7 @@ def init_db():
                 ("active_zone_mining", "TEXT DEFAULT ''"),
                 ("gather_collection", "TEXT DEFAULT '{}'"),
                 ("mastery_claimed", "TEXT DEFAULT '{}'"),
+                ("faculty", "TEXT DEFAULT ''"),
             ]:
                 try:
                     with get_conn() as conn:  # <-- отдельное соединение на каждый ALTER
@@ -3543,6 +3949,7 @@ def do_work(user: dict) -> tuple[bool, str]:
     if luck_ach_msg:
         event_block += f"\n\n{luck_ach_msg}"
     max_energy = get_max_energy(user)
+    contribute_faculty_points(user["user_id"], max(1, earned_coins // 20))
     return True, (
         f"🛠 Ты поработал как <b>{user['job']}</b>!"
         f"{event_block}\n\n"
@@ -4878,6 +5285,26 @@ HELP_CATEGORIES = {
             "<b>рюкзак</b> / <b>трофеи</b> или /inventory — твои предметы с боссов\n"
             "  Экипируй один предмет — он даёт пассивный бонус к монетам/опыту/удаче\n"
             "  Улучшай предметы за 🔶 осколки"
+        ),
+    },
+    "clans": {
+        "label": "🏛 Факультеты и мировые боссы",
+        "text": (
+            "🏛 <b>Факультеты (кланы)</b>\n\n"
+            "<b>факультет</b> / <b>факультеты</b> / <b>клан</b> / /faculty — "
+            "выбрать факультет и посмотреть свой бонус\n"
+            "  Каждый факультет даёт постоянный %-бонус (монеты/опыт/удача), "
+            "растущий вместе с очками всех его участников\n"
+            "  Очки начисляются за работу, добычу ресурсов и победы над боссами\n"
+            f"  Смена факультета стоит <b>3000</b> монет\n"
+            "  🏆 Топ факультетов — кнопка в меню факультета\n\n"
+            "🌍 <b>Мировые боссы</b>\n\n"
+            "<b>мировой босс</b> / <b>мб</b> / /world_boss — посмотреть статус "
+            "и атаковать текущего мирового босса\n"
+            "  Общий на все чаты противник с огромным HP — сражайтесь все вместе!\n"
+            "  Награда каждому пропорциональна нанесённому урону, "
+            "а лучший по урону получает дополнительный бонус\n"
+            "  Появляется автоматически или вручную от администрации"
         ),
     },
     "gathering": {
@@ -8291,10 +8718,11 @@ def get_combined_bonus(user: dict) -> tuple[int, int, int]:
     asc_xp    = get_ascension_upgrade_bonus(user, "xp_boost")
     asc_luck  = get_ascension_upgrade_bonus(user, "luck_boost")
     asc_item_coins, asc_item_xp, asc_item_luck = get_equipped_ascension_item_bonus(user)
+    faculty_coins, faculty_xp, faculty_luck = get_faculty_bonus(user)
     return (
-        pet_coins + title_coins + marriage_coins + item_coins + rebirth_coins + asc_coins + asc_item_coins,
-        pet_xp + title_xp + marriage_xp + item_xp + rebirth_xp + asc_xp + asc_item_xp,
-        pet_luck + title_luck + item_luck + asc_luck + asc_item_luck,
+        pet_coins + title_coins + marriage_coins + item_coins + rebirth_coins + asc_coins + asc_item_coins + faculty_coins,
+        pet_xp + title_xp + marriage_xp + item_xp + rebirth_xp + asc_xp + asc_item_xp + faculty_xp,
+        pet_luck + title_luck + item_luck + asc_luck + asc_item_luck + faculty_luck,
     )
 
 
@@ -9025,6 +9453,190 @@ async def cmd_slots(message: Message):
 
     update_quest_progress(uid, "slots")
     check_and_grant_achievements(get_user(uid))
+
+# =====================================================================
+# ФАКУЛЬТЕТЫ (кланы)
+# =====================================================================
+FACULTIES = {
+    "it": {
+        "name": "🧑‍💻 Факультет ИТ",
+        "bonus_type": "coins", "base_bonus": 4, "per_level": 2,
+        "description": "Айтишники подрабатывают фрилансом. Бонус к монетам с работы.",
+    },
+    "ff": {
+        "name": "🗣 Факультет Филологии (ФФ)",
+        "bonus_type": "xp", "base_bonus": 4, "per_level": 2,
+        "description": "Учат языки быстрее всех. Бонус к опыту с работы.",
+    },
+    "fgie": {
+        "name": "💼 ФГиЭ (Гуманитарные и Экономические науки)",
+        "bonus_type": "luck", "base_bonus": 3, "per_level": 1,
+        "description": "Умеют предсказывать рынок. Бонус к удаче.",
+    },
+    "eng": {
+        "name": "⚙️ Инженерный факультет",
+        "bonus_type": "xp", "base_bonus": 5, "per_level": 2,
+        "description": "Много практики — быстрая прокачка. Бонус к опыту с работы.",
+    },
+    "med": {
+        "name": "⚕️ Медицинский факультет",
+        "bonus_type": "coins", "base_bonus": 5, "per_level": 2,
+        "description": "Подрабатывают в клиниках. Бонус к монетам с работы.",
+    },
+}
+
+FACULTY_LEVEL_THRESHOLDS = [0, 3000, 10000, 30000, 80000, 200000, 500000]
+FACULTY_SWITCH_COST = 3000
+
+
+def get_faculty_level(points: int) -> int:
+    level = 0
+    for i, threshold in enumerate(FACULTY_LEVEL_THRESHOLDS):
+        if points >= threshold:
+            level = i
+    return level
+
+
+def ensure_faculty_rows():
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for key in FACULTIES:
+                cur.execute(
+                    "INSERT INTO faculties (faculty_key, points) VALUES (%s, 0) "
+                    "ON CONFLICT (faculty_key) DO NOTHING", (key,)
+                )
+            conn.commit()
+
+
+def get_faculty_points(faculty_key: str) -> int:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT points FROM faculties WHERE faculty_key = %s", (faculty_key,))
+            row = cur.fetchone()
+    return row[0] if row else 0
+
+
+def add_faculty_points(faculty_key: str, amount: int):
+    if not faculty_key or faculty_key not in FACULTIES or amount <= 0:
+        return
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO faculties (faculty_key, points) VALUES (%s, %s) "
+                "ON CONFLICT (faculty_key) DO UPDATE SET points = faculties.points + EXCLUDED.points",
+                (faculty_key, amount)
+            )
+            conn.commit()
+
+
+def contribute_faculty_points(user_id: int, amount: int):
+    user = get_user(user_id)
+    if user and user.get("faculty"):
+        add_faculty_points(user["faculty"], amount)
+
+
+def get_faculty_bonus(user: dict) -> tuple[int, int, int]:
+    """Возвращает (coins_pct, xp_pct, luck) от факультета пользователя."""
+    cfg = FACULTIES.get(user.get("faculty", "") or "")
+    if not cfg:
+        return 0, 0, 0
+    level = get_faculty_level(get_faculty_points(user["faculty"]))
+    bonus = cfg["base_bonus"] + level * cfg["per_level"]
+    if cfg["bonus_type"] == "coins":
+        return bonus, 0, 0
+    elif cfg["bonus_type"] == "xp":
+        return 0, bonus, 0
+    return 0, 0, bonus
+
+
+def build_faculty_text(user: dict) -> str:
+    fkey = user.get("faculty", "")
+    label_map = {"coins": "монеты с работы", "xp": "опыт с работы", "luck": "удача"}
+
+    if not fkey or fkey not in FACULTIES:
+        lines = ["🏛 <b>Факультеты КТУ «Манас»</b>\n",
+                  "Выбери факультет — постоянный бонус, растущий вместе со всеми участниками!\n"]
+        for key, cfg in FACULTIES.items():
+            points = get_faculty_points(key)
+            level = get_faculty_level(points)
+            bonus = cfg["base_bonus"] + level * cfg["per_level"]
+            lines.append(
+                f"<b>{cfg['name']}</b> — ур. {level} ({points} очков)\n"
+                f"  <i>{cfg['description']}</i>\n"
+                f"  Текущий бонус: +{bonus} к {label_map[cfg['bonus_type']]}"
+            )
+        return "\n\n".join(lines)
+
+    cfg = FACULTIES[fkey]
+    points = get_faculty_points(fkey)
+    level = get_faculty_level(points)
+    bonus = cfg["base_bonus"] + level * cfg["per_level"]
+    next_threshold = next((t for t in FACULTY_LEVEL_THRESHOLDS if t > points), None)
+    next_line = f"\nДо след. уровня: {next_threshold - points} очков" if next_threshold else "\nМаксимальный уровень факультета!"
+    return (
+        f"🏛 <b>Твой факультет</b>\n\n<b>{cfg['name']}</b>\n<i>{cfg['description']}</i>\n\n"
+        f"📊 Уровень: <b>{level}</b>\n⭐ Очков: <b>{points}</b>{next_line}\n\n"
+        f"🎁 Твой бонус: <b>+{bonus}</b> к {label_map[cfg['bonus_type']]}\n\n"
+        f"<i>Работай, добывай ресурсы и побеждай боссов — это приносит очки факультету!</i>"
+    )
+
+
+def get_faculty_keyboard(user: dict) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    fkey = user.get("faculty", "")
+    for key, cfg in FACULTIES.items():
+        if key == fkey:
+            continue
+        label = "Сменить на" if fkey else "Вступить:"
+        builder.button(text=f"{label} {cfg['name']}", callback_data=f"faculty_join:{key}")
+    builder.button(text="🏆 Топ факультетов", callback_data="faculty_top")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+@dp.message(Command("faculty"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("факультет", "факультеты", "клан")))
+async def cmd_faculty(message: Message):
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
+    await message.answer(build_faculty_text(user), reply_markup=get_faculty_keyboard(user))
+
+
+@dp.callback_query(F.data.startswith("faculty_join:"))
+async def cb_faculty_join(callback: CallbackQuery):
+    key = callback.data.split(":")[1]
+    if key not in FACULTIES:
+        await callback.answer("❌ Такого факультета нет.", show_alert=True)
+        return
+    user = get_user_safe(callback.from_user.id)
+    current = user.get("faculty", "")
+    if current == key:
+        await callback.answer("Ты уже здесь состоишь!", show_alert=True)
+        return
+    if current:
+        if user["balance"] < FACULTY_SWITCH_COST:
+            await callback.answer(f"❌ Смена факультета стоит {FACULTY_SWITCH_COST} монет.", show_alert=True)
+            return
+        update_user(callback.from_user.id, balance=user["balance"] - FACULTY_SWITCH_COST, faculty=key)
+        await callback.answer(f"✅ Ты перешёл на {FACULTIES[key]['name']}! (-{FACULTY_SWITCH_COST} монет)", show_alert=True)
+    else:
+        update_user(callback.from_user.id, faculty=key)
+        await callback.answer(f"✅ Добро пожаловать на {FACULTIES[key]['name']}!", show_alert=True)
+    updated = get_user(callback.from_user.id)
+    await callback.message.edit_text(build_faculty_text(updated), reply_markup=get_faculty_keyboard(updated))
+
+
+@dp.callback_query(F.data == "faculty_top")
+async def cb_faculty_top(callback: CallbackQuery):
+    rows = [(key, cfg, get_faculty_points(key)) for key, cfg in FACULTIES.items()]
+    rows.sort(key=lambda x: -x[2])
+    medals = ["🥇", "🥈", "🥉"]
+    lines = ["🏆 <b>Топ факультетов</b>\n"]
+    for i, (key, cfg, points) in enumerate(rows, 1):
+        medal = medals[i - 1] if i <= 3 else f"{i}."
+        lines.append(f"{medal} <b>{cfg['name']}</b> — ур. {get_faculty_level(points)} ({points} очков)")
+    await callback.answer()
+    await callback.message.answer("\n".join(lines))
+
 # =====================================================================
 # СИСТЕМА ИВЕНТОВ
 # =====================================================================
@@ -9857,6 +10469,7 @@ def do_fight_boss(user: dict, boss_key: str) -> tuple[bool, str]:
         update_user(user["user_id"], ascension_crystals=user.get("ascension_crystals", 0) + 1)
     update_user(user["user_id"], shards=new_shards)
     bump_stat(user["user_id"], "stat_boss_kills")
+    contribute_faculty_points(user["user_id"], 15)
     change_reputation(user["user_id"], +2)
 
     item_line = ""
@@ -10764,6 +11377,8 @@ def do_gather(user: dict, node_key: str, times: int = 1) -> tuple[bool, str]:
 
     rank_name, rank_pct = get_mastery_rank(skill_val)
     rank_line = f"\n🎖 Мастерство: <b>{rank_name or '—'}</b> (+{rank_pct}%)" if rank_name else ""
+    contribute_faculty_points(user["user_id"], times * 2)
+
 
     return True, (
         f"{node['label']} ×{times} — зона: <b>{zone['name']}</b>\n\n"
@@ -11025,6 +11640,7 @@ def do_fight_location_boss(user: dict, boss_key: str) -> tuple[bool, str]:
     user = {**fresh, "balance": new_balance, "exp": new_exp}
     user, level_msgs = auto_level_up(user)
     level_block = "".join(level_msgs)
+    contribute_faculty_points(user["user_id"], 15)
     change_reputation(user["user_id"], +2)
 
     item_line = ""
@@ -11816,7 +12432,9 @@ async def cb_tool_upgrade(callback: CallbackQuery):
 async def main():
     init_db()
     load_chats_from_db()
+    ensure_faculty_rows()
     asyncio.create_task(auto_event_scheduler())
+    asyncio.create_task(auto_world_boss_scheduler())
     print("✅ PostgreSQL БД инициализирована. Бот КТУ Манас запускается...")
     await dp.start_polling(bot)
 
