@@ -9460,17 +9460,17 @@ async def cmd_slots(message: Message):
 FACULTIES = {
     "it": {
         "name": "🧑‍💻 Факультет ИТ",
-        "bonus_type": "coins", "base_bonus": 4, "per_level": 2,
+        "bonus_type": "coins", "base_bonus": 5, "per_level": 2,
         "description": "Айтишники подрабатывают фрилансом. Бонус к монетам с работы.",
     },
     "ff": {
         "name": "🗣 Факультет Филологии (ФФ)",
-        "bonus_type": "xp", "base_bonus": 4, "per_level": 2,
+        "bonus_type": "xp", "base_bonus": 5, "per_level": 2,
         "description": "Учат языки быстрее всех. Бонус к опыту с работы.",
     },
     "fgie": {
         "name": "💼 ФГиЭ (Гуманитарные и Экономические науки)",
-        "bonus_type": "luck", "base_bonus": 3, "per_level": 1,
+        "bonus_type": "luck", "base_bonus": 5, "per_level": 1,
         "description": "Умеют предсказывать рынок. Бонус к удаче.",
     },
     "eng": {
@@ -9482,6 +9482,16 @@ FACULTIES = {
         "name": "⚕️ Медицинский факультет",
         "bonus_type": "coins", "base_bonus": 5, "per_level": 2,
         "description": "Подрабатывают в клиниках. Бонус к монетам с работы.",
+    },
+    "fk": {
+        "name": "🗣 Факультет Коммуникации (ФК)",
+        "bonus_type": "xp", "base_bonus": 5, "per_level": 2,
+        "description": "Снимают по всему Манасу ролики. Бонус к опыту с работы.",
+    },
+    "Dis": {
+        "name": "🧑‍🎨 Факультет Искусств",
+        "bonus_type": "coins", "base_bonus": 5, "per_level": 2,
+        "description": "Вы рисуете на улицах портреты. Бонус к монетам с работы.",
     },
 }
 
