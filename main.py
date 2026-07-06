@@ -89,10 +89,10 @@ def get_conn():
 # ФОРМУЛА ОПЫТА
 # =====================================================================
 def xp_needed(level: int) -> int:
-    return int(120 * (level ** 1.65))
+    return int(100 * (level ** 1.50))   # было 120 * level**1.65
 
 def scale_xp(base_xp: int, level: int) -> int:
-    return int(base_xp * (1 + level * 0.08))
+    return int(base_xp * (1 + level * 0.11))
 
 def scale_coins(base_coins: int, level: int) -> int:
     return int(base_coins * (1 + level * 0.05))
@@ -3515,6 +3515,9 @@ def init_db():
                 ("gather_collection", "TEXT DEFAULT '{}'"),
                 ("mastery_claimed", "TEXT DEFAULT '{}'"),
                 ("faculty", "TEXT DEFAULT ''"),
+                ("automations_owned", "TEXT DEFAULT ''"),
+                ("automations_enabled", "TEXT DEFAULT ''"),
+                ("auto_eat_reserve", "INTEGER DEFAULT 0"),
             ]:
                 try:
                     with get_conn() as conn:  # <-- отдельное соединение на каждый ALTER
@@ -5359,6 +5362,23 @@ HELP_CATEGORIES = {
             "📈 Покер:\n"
             "<b>покер создать</b> / <b>покер старт</b>\n"
             "<b>чек</b> / <b>колл</b> / <b>рейз [сумма]</b> / <b>фолд</b> / <b>ва-банк</b>"
+            "\n🎡 <b>Рулетка</b> (не влияет на репутацию)\n"
+            "<code>рулетка цвет красное/чёрное 500</code>\n"
+            "<code>рулетка число 0-36 500</code>\n"
+            "<code>рулетка чет/нечет 500</code>\n"
+            "<code>рулетка половина 1-18/19-36 500</code>\n"
+            "<code>рулетка дюжина 1/2/3 500</code>\n\n"
+            "🃏 <b>Дурак</b> (против бота)\n"
+            "<code>дурак</code> — начать игру\n"
+            "<code>дурак сдаться</code> — прервать текущую партию\n"
+            "Ходы делаются кнопками под сообщением"
+            "\n🃏 <b>Дурак против игрока</b>\n"
+            "<code>дурак @username</code> — вызвать на партию (можно со ставкой: <code>дурак @username 500</code>)\n"
+            "<code>кинуть/подкинуть 7h</code> — подкинуть карту\n"
+            "<code>бить/покрыть Ks</code> — отбиться картой\n"
+            "<code>бито</code> — завершить раунд атакующим\n"
+            "<code>взять</code> — забрать карты защищающимся\n"
+            "<code>дурак статус</code> / <code>дурак отмена</code>"
         ),
     },
     "bunker": {
@@ -10091,6 +10111,891 @@ async def cmd_current_event(message: Message):
         f"🎁 <b>Бонусы:</b>\n{bonuses_text}\n\n"
         f"⏳ Осталось: <b>{hours}ч {minutes}мин</b> (до {ends_str})"
     )
+
+# =====================================================================
+# РУЛЕТКА (не влияет на репутацию)
+# =====================================================================
+ROULETTE_MIN_BET = 50
+ROULETTE_RED = {1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36}
+
+ROULETTE_PAYOUTS = {
+    "цвет": 2, "чет": 2, "нечет": 2, "половина": 2,
+    "число": 36, "дюжина": 3,
+}
+
+def _roulette_color(num: int) -> str:
+    if num == 0:
+        return "зелёное"
+    return "красное" if num in ROULETTE_RED else "чёрное"
+
+def _roulette_check_win(bet_type: str, bet_value: str, result: int) -> bool:
+    if bet_type == "цвет":
+        return _roulette_color(result) == bet_value
+    if bet_type == "чет":
+        return result != 0 and result % 2 == 0
+    if bet_type == "нечет":
+        return result != 0 and result % 2 == 1
+    if bet_type == "половина":
+        if result == 0:
+            return False
+        return (1 <= result <= 18) if bet_value == "1-18" else (19 <= result <= 36)
+    if bet_type == "число":
+        return str(result) == bet_value
+    if bet_type == "дюжина":
+        if result == 0:
+            return False
+        d = int(bet_value)
+        if d == 1: return 1 <= result <= 12
+        if d == 2: return 13 <= result <= 24
+        if d == 3: return 25 <= result <= 36
+    return False
+
+def do_roulette_bet(user: dict, bet_type: str, bet_value: str, amount: int) -> tuple[bool, str]:
+    bet_type = bet_type.lower()
+    if bet_type not in ROULETTE_PAYOUTS:
+        return False, (
+            "❌ Неверный тип ставки.\n\n"
+            "<code>рулетка цвет красное 500</code>\n"
+            "<code>рулетка число 17 500</code>\n"
+            "<code>рулетка чет 500</code> / <code>рулетка нечет 500</code>\n"
+            "<code>рулетка половина 1-18 500</code>\n"
+            "<code>рулетка дюжина 2 500</code>"
+        )
+    if amount < ROULETTE_MIN_BET:
+        return False, f"❌ Минимальная ставка: <b>{ROULETTE_MIN_BET}</b> монет."
+    if user["balance"] < amount:
+        return False, f"❌ Недостаточно монет. Баланс: <b>{user['balance']}</b>"
+
+    if bet_type == "число":
+        if not bet_value.isdigit() or not (0 <= int(bet_value) <= 36):
+            return False, "❌ Число должно быть от 0 до 36."
+    if bet_type == "дюжина" and bet_value not in ("1", "2", "3"):
+        return False, "❌ Дюжина должна быть 1, 2 или 3."
+    if bet_type == "половина" and bet_value not in ("1-18", "19-36"):
+        return False, "❌ Половина должна быть 1-18 или 19-36."
+    if bet_type == "цвет":
+        if bet_value == "черное":
+            bet_value = "чёрное"
+        if bet_value not in ("красное", "чёрное"):
+            return False, "❌ Цвет должен быть 'красное' или 'чёрное'."
+
+    result = random.randint(0, 36)
+    color = _roulette_color(result)
+    won = _roulette_check_win(bet_type, bet_value, result)
+
+    if won:
+        mult = ROULETTE_PAYOUTS[bet_type]
+        profit = apply_full_coin_bonus(user, amount * mult)
+        new_balance = user["balance"] + profit
+        update_user(user["user_id"], balance=new_balance)
+        text = (
+            f"🎡 Шарик упал на <b>{result}</b> ({color})!\n\n"
+            f"🎉 <b>Выигрыш!</b> Множитель x{mult}\n"
+            f"💰 +{profit} монет\n📊 Баланс: <b>{new_balance}</b>"
+        )
+    else:
+        new_balance = user["balance"] - amount
+        update_user(user["user_id"], balance=new_balance)
+        text = (
+            f"🎡 Шарик упал на <b>{result}</b> ({color})!\n\n"
+            f"😢 <b>Мимо!</b>\n💸 -{amount} монет\n📊 Баланс: <b>{new_balance}</b>"
+        )
+    return True, text
+
+
+@dp.message(F.text.func(lambda t: t and t.strip().lower().startswith("рулетка ")))
+async def txt_roulette(message: Message):
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
+    parts = message.text.strip().split()
+    if len(parts) < 3:
+        await message.answer(
+            "❌ Формат:\n"
+            "<code>рулетка цвет красное 500</code>\n"
+            "<code>рулетка число 17 500</code>\n"
+            "<code>рулетка чет 500</code> / <code>рулетка нечет 500</code>\n"
+            "<code>рулетка половина 1-18 500</code>\n"
+            "<code>рулетка дюжина 2 500</code>"
+        )
+        return
+
+    bet_type = parts[1].lower()
+    if bet_type in ("чет", "нечет"):
+        if len(parts) != 3 or not parts[2].isdigit():
+            await message.answer("❌ Формат: <code>рулетка чет 500</code>")
+            return
+        bet_value, amount = "", int(parts[2])
+    else:
+        if len(parts) != 4 or not parts[3].isdigit():
+            await message.answer("❌ Формат: <code>рулетка цвет красное 500</code>")
+            return
+        bet_value, amount = parts[2].lower(), int(parts[3])
+
+    _, text = do_roulette_bet(user, bet_type, bet_value, amount)
+    mention = message.from_user.mention_html() + "\n" if message.chat.type != "private" else ""
+    await message.answer(mention + text)
+
+# =====================================================================
+# ДУРАК (упрощённая версия против бота)
+# =====================================================================
+DUR_RANK_VALUE = {r: i for i, r in enumerate(['6','7','8','9','10','J','Q','K','A'], start=6)}
+
+def _dur_new_deck():
+    suits = ['♠','♥','♦','♣']
+    deck = [f"{r}{s}" for s in suits for r in DUR_RANK_VALUE]
+    random.shuffle(deck)
+    return deck
+
+def _dur_suit(card): return card[-1]
+def _dur_rank(card): return card[:-1]
+def _dur_value(card): return DUR_RANK_VALUE[_dur_rank(card)]
+
+def _dur_can_beat(attack_card, defend_card, trump_suit) -> bool:
+    a_s, a_v = _dur_suit(attack_card), _dur_value(attack_card)
+    d_s, d_v = _dur_suit(defend_card), _dur_value(defend_card)
+    if d_s == a_s:
+        return d_v > a_v
+    return d_s == trump_suit and a_s != trump_suit
+
+def _dur_bot_choose_defend(attack_card, bot_hand, trump_suit):
+    candidates = [c for c in bot_hand if _dur_can_beat(attack_card, c, trump_suit)]
+    if not candidates:
+        return None
+    non_trump = [c for c in candidates if _dur_suit(c) != trump_suit]
+    pool = non_trump if non_trump else candidates
+    pool.sort(key=_dur_value)
+    return pool[0]
+
+def _dur_bot_choose_attack(bot_hand, table, max_table, trump_suit):
+    if len(table) >= max_table or not bot_hand:
+        return None
+    if not table:
+        pool = list(bot_hand)
+    else:
+        ranks = set()
+        for e in table:
+            ranks.add(_dur_rank(e["attack"]))
+            if e["defend"]:
+                ranks.add(_dur_rank(e["defend"]))
+        pool = [c for c in bot_hand if _dur_rank(c) in ranks]
+    if not pool:
+        return None
+    non_trump = [c for c in pool if _dur_suit(c) != trump_suit]
+    chosen = non_trump if non_trump else pool
+    chosen.sort(key=_dur_value)
+    return chosen[0]
+
+
+class DurakGame:
+    def __init__(self, user_id: int):
+        self.user_id = user_id
+        deck = _dur_new_deck()
+        self.player_hand = [deck.pop() for _ in range(6)]
+        self.bot_hand = [deck.pop() for _ in range(6)]
+        self.trump_suit = _dur_suit(deck[0])
+        self.deck = deck
+        self.table: list[dict] = []
+        self.attacker = random.choice(["player", "bot"])
+        self.finished = False
+        self.winner = None
+        self.max_table = min(6, len(self.bot_hand if self.attacker == "player" else self.player_hand)) or 1
+
+    def _refill(self):
+        for who in (self.attacker, "bot" if self.attacker == "player" else "player"):
+            hand = self.player_hand if who == "player" else self.bot_hand
+            while len(hand) < 6 and self.deck:
+                hand.append(self.deck.pop())
+
+    def _check_game_over(self) -> bool:
+        if self.deck:
+            return False
+        if not self.player_hand and not self.bot_hand:
+            self.finished, self.winner = True, "draw"; return True
+        if not self.player_hand:
+            self.finished, self.winner = True, "player"; return True
+        if not self.bot_hand:
+            self.finished, self.winner = True, "bot"; return True
+        return False
+
+    def _new_round(self, next_attacker: str):
+        self.table = []
+        self._refill()
+        if self._check_game_over():
+            return
+        self.attacker = next_attacker
+        self.max_table = min(6, len(self.bot_hand if self.attacker == "player" else self.player_hand)) or 1
+
+    def addable_ranks(self):
+        ranks = set()
+        for e in self.table:
+            ranks.add(_dur_rank(e["attack"]))
+            if e["defend"]:
+                ranks.add(_dur_rank(e["defend"]))
+        return ranks
+
+    def player_valid_attack_cards(self):
+        if not self.table:
+            return list(self.player_hand)
+        ranks = self.addable_ranks()
+        return [c for c in self.player_hand if _dur_rank(c) in ranks]
+
+    def player_valid_defend_cards(self):
+        for e in self.table:
+            if e["defend"] is None:
+                return [c for c in self.player_hand if _dur_can_beat(e["attack"], c, self.trump_suit)]
+        return []
+
+    def player_attack(self, card: str) -> str:
+        if self.finished or self.attacker != "player" or len(self.table) >= self.max_table:
+            return ""
+        if card not in self.player_valid_attack_cards():
+            return ""
+        self.player_hand.remove(card)
+        self.table.append({"attack": card, "defend": None})
+        log = [f"➡️ Ты подкидываешь: <b>{card}</b>"]
+        defend = _dur_bot_choose_defend(card, self.bot_hand, self.trump_suit)
+        if defend:
+            self.bot_hand.remove(defend)
+            self.table[-1]["defend"] = defend
+            log.append(f"🛡 Бот отбивается: <b>{defend}</b>")
+        else:
+            log.append("😤 Бот не может отбиться и забирает карты со стола!")
+            for e in self.table:
+                self.bot_hand.append(e["attack"])
+                if e["defend"]:
+                    self.bot_hand.append(e["defend"])
+            self._new_round("player")
+            if self.finished:
+                log.append(self._finish_text())
+        return "\n".join(log)
+
+    def player_done(self) -> str:
+        if self.finished or self.attacker != "player":
+            return ""
+        if any(e["defend"] is None for e in self.table):
+            return ""
+        self._new_round("bot")
+        log = ["✅ Раунд завершён, карты уходят в отбой."]
+        if self.finished:
+            log.append(self._finish_text())
+        else:
+            bot_log = self._bot_attack_phase()
+            if bot_log:
+                log.append(bot_log)
+        return "\n".join(log)
+
+    def player_defend(self, card: str) -> str:
+        if self.finished or self.attacker != "bot":
+            return ""
+        undefended = next((e for e in self.table if e["defend"] is None), None)
+        if not undefended or card not in self.player_hand or not _dur_can_beat(undefended["attack"], card, self.trump_suit):
+            return ""
+        self.player_hand.remove(card)
+        undefended["defend"] = card
+        log = [f"🛡 Ты отбиваешься: <b>{card}</b>"]
+        bot_log = self._bot_attack_phase()
+        if bot_log:
+            log.append(bot_log)
+        return "\n".join(log)
+
+    def player_take(self) -> str:
+        if self.finished or self.attacker != "bot":
+            return ""
+        for e in self.table:
+            self.player_hand.append(e["attack"])
+            if e["defend"]:
+                self.player_hand.append(e["defend"])
+        self._new_round("bot")
+        log = ["🖐 Ты забираешь карты со стола."]
+        if self.finished:
+            log.append(self._finish_text())
+        return "\n".join(log)
+
+    def _bot_attack_phase(self) -> str:
+        if self.finished or any(e["defend"] is None for e in self.table):
+            return ""
+        card = _dur_bot_choose_attack(self.bot_hand, self.table, self.max_table, self.trump_suit)
+        if card:
+            self.bot_hand.remove(card)
+            self.table.append({"attack": card, "defend": None})
+            return f"➡️ Бот подкидывает: <b>{card}</b>"
+        self._new_round("player")
+        text = "✅ Бот завершает раунд, карты уходят в отбой."
+        if self.finished:
+            text += "\n" + self._finish_text()
+        return text
+
+    def start_bot_attack_if_needed(self) -> str:
+        if self.attacker == "bot" and not self.table:
+            return self._bot_attack_phase()
+        return ""
+
+    def _finish_text(self) -> str:
+        if self.winner == "player":
+            return "🏆 <b>Ты победил! Бот остался в дураках!</b>"
+        if self.winner == "bot":
+            return "😢 <b>Ты остался в дураках...</b>"
+        return "🤝 <b>Ничья! Карты закончились одновременно.</b>"
+
+    def render_table(self) -> str:
+        if not self.table:
+            return "(стол пуст)"
+        return "  |  ".join(f"{e['attack']} → {e['defend'] or '❓'}" for e in self.table)
+
+    def status_text(self) -> str:
+        role = "атакующий ➡️" if self.attacker == "player" else "защищаешься 🛡"
+        hand_str = "  ".join(sorted(self.player_hand, key=lambda c: (_dur_suit(c), _dur_value(c))))
+        return (
+            f"🃏 <b>Дурак</b> (козырь: {self.trump_suit})\n\n"
+            f"🎴 Стол: {self.render_table()}\n\n"
+            f"👤 Твоя рука ({len(self.player_hand)}): {hand_str or '—'}\n"
+            f"🤖 У бота карт: {len(self.bot_hand)}\n"
+            f"🂠 В колоде: {len(self.deck)}\n\n"
+            f"Ты сейчас: <b>{role}</b>"
+        )
+
+    def keyboard(self) -> InlineKeyboardMarkup:
+        builder = InlineKeyboardBuilder()
+        if self.finished:
+            return builder.as_markup()
+        if self.attacker == "player":
+            for c in self.player_valid_attack_cards():
+                builder.button(text=f"➡️ {c}", callback_data=f"dur_atk:{c}")
+            if self.table and all(e["defend"] is not None for e in self.table):
+                builder.button(text="✅ Бито (закончить)", callback_data="dur_done")
+        else:
+            for c in self.player_valid_defend_cards():
+                builder.button(text=f"🛡 {c}", callback_data=f"dur_def:{c}")
+            builder.button(text="🖐 Взять карты", callback_data="dur_take")
+        builder.adjust(3)
+        return builder.as_markup()
+
+
+durak_games: dict[int, DurakGame] = {}
+
+
+@dp.message(Command("durak"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("дурак", "играть в дурака")))
+async def cmd_durak(message: Message):
+    uid = message.from_user.id
+    get_user_safe(uid, message.from_user.username or message.from_user.full_name)
+    if uid in durak_games and not durak_games[uid].finished:
+        await message.answer("⚠️ У тебя уже есть незавершённая игра! Напиши <code>дурак сдаться</code>, чтобы прервать.")
+        return
+    game = DurakGame(uid)
+    durak_games[uid] = game
+    intro = f"🃏 <b>Игра «Дурак» началась!</b>\nКозырь: <b>{game.trump_suit}</b>\n\n"
+    auto = game.start_bot_attack_if_needed()
+    if auto:
+        intro += auto + "\n\n"
+    await message.answer(intro + game.status_text(), reply_markup=game.keyboard())
+
+
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("дурак сдаться", "сдаться")))
+async def cmd_durak_surrender(message: Message):
+    uid = message.from_user.id
+    if uid in durak_games:
+        del durak_games[uid]
+        await message.answer("🚪 Игра в дурака прервана.")
+    else:
+        await message.answer("У тебя нет активной игры в дурака.")
+
+
+async def _durak_finalize_if_needed(callback: CallbackQuery, game: DurakGame):
+    if not game.finished:
+        return
+    uid = game.user_id
+    user = get_user(uid)
+    reward_text = ""
+    if game.winner == "player" and user:
+        coins = apply_full_coin_bonus(user, 200 + user["level"] * 5)
+        exp = apply_combined_xp_bonus(user, 80 + user["level"] * 3)
+        update_user(uid, balance=user["balance"] + coins, exp=user["exp"] + exp)
+        fresh = get_user(uid)
+        if fresh:
+            auto_level_up(fresh)
+            check_and_grant_achievements(fresh)
+            contribute_faculty_points(uid, 20)
+        reward_text = f"\n\n🎁 Награда: +{coins} монет, +{exp} XP"
+    durak_games.pop(uid, None)
+    await callback.message.answer("Игра окончена." + reward_text)
+
+
+async def _durak_handle(callback: CallbackQuery, action_result: str, game: DurakGame):
+    await callback.answer()
+    if action_result:
+        await callback.message.answer(action_result)
+    if game.finished:
+        await callback.message.edit_text(game.status_text())
+        await _durak_finalize_if_needed(callback, game)
+    else:
+        await callback.message.edit_text(game.status_text(), reply_markup=game.keyboard())
+
+
+@dp.callback_query(F.data.startswith("dur_atk:"))
+async def cb_durak_attack(callback: CallbackQuery):
+    game = durak_games.get(callback.from_user.id)
+    if not game:
+        await callback.answer("Игра не найдена.", show_alert=True); return
+    card = callback.data.split(":", 1)[1]
+    await _durak_handle(callback, game.player_attack(card), game)
+
+
+@dp.callback_query(F.data == "dur_done")
+async def cb_durak_done(callback: CallbackQuery):
+    game = durak_games.get(callback.from_user.id)
+    if not game:
+        await callback.answer("Игра не найдена.", show_alert=True); return
+    await _durak_handle(callback, game.player_done(), game)
+
+
+@dp.callback_query(F.data.startswith("dur_def:"))
+async def cb_durak_defend(callback: CallbackQuery):
+    game = durak_games.get(callback.from_user.id)
+    if not game:
+        await callback.answer("Игра не найдена.", show_alert=True); return
+    card = callback.data.split(":", 1)[1]
+    await _durak_handle(callback, game.player_defend(card), game)
+
+
+@dp.callback_query(F.data == "dur_take")
+async def cb_durak_take(callback: CallbackQuery):
+    game = durak_games.get(callback.from_user.id)
+    if not game:
+        await callback.answer("Игра не найдена.", show_alert=True); return
+    await _durak_handle(callback, game.player_take(), game)
+
+# =====================================================================
+# ДУРАК PvP (игрок против игрока, в группе)
+# =====================================================================
+DURAK_SUIT_ALIASES = {"s": "♠", "h": "♥", "d": "♦", "c": "♣",
+                       "с": "♠", "ч": "♥", "б": "♦", "т": "♣"}  # рус. раскладка на всякий случай
+
+def _dur_parse_card(raw: str) -> str | None:
+    raw = raw.strip()
+    if not raw:
+        return None
+    suit_char = raw[-1].lower()
+    suit = DURAK_SUIT_ALIASES.get(suit_char, raw[-1])
+    if suit not in ('♠', '♥', '♦', '♣'):
+        return None
+    rank = raw[:-1].upper()
+    if rank not in DUR_RANK_VALUE:
+        return None
+    return f"{rank}{suit}"
+
+
+class DurakDuel:
+    def __init__(self, chat_id: int, p1_id: int, p1_name: str, p2_id: int, p2_name: str, bet: int = 0):
+        self.chat_id = chat_id
+        self.bet = bet
+        deck = _dur_new_deck()
+        self.hands = {p1_id: [deck.pop() for _ in range(6)], p2_id: [deck.pop() for _ in range(6)]}
+        self.names = {p1_id: p1_name, p2_id: p2_name}
+        self.trump_suit = _dur_suit(deck[0])
+        self.deck = deck
+        self.table: list[dict] = []
+        self.attacker_id, self.defender_id = random.choice([(p1_id, p2_id), (p2_id, p1_id)])
+        self.max_table = 6
+        self.finished = False
+        self.winner_id = None
+
+    def other(self, uid: int) -> int:
+        return self.defender_id if uid == self.attacker_id else self.attacker_id
+
+    def _refill(self):
+        for uid in (self.attacker_id, self.defender_id):
+            hand = self.hands[uid]
+            while len(hand) < 6 and self.deck:
+                hand.append(self.deck.pop())
+
+    def _check_game_over(self) -> bool:
+        if self.deck:
+            return False
+        p1, p2 = list(self.hands.keys())
+        if not self.hands[p1] and not self.hands[p2]:
+            self.finished, self.winner_id = True, None
+            return True
+        if not self.hands[p1]:
+            self.finished, self.winner_id = True, p1
+            return True
+        if not self.hands[p2]:
+            self.finished, self.winner_id = True, p2
+            return True
+        return False
+
+    def _new_round(self, next_attacker: int):
+        self.table = []
+        self._refill()
+        if self._check_game_over():
+            return
+        self.attacker_id = next_attacker
+        self.defender_id = self.other(next_attacker)
+        self.max_table = 6
+
+    def addable_ranks(self):
+        ranks = set()
+        for e in self.table:
+            ranks.add(_dur_rank(e["attack"]))
+            if e["defend"]:
+                ranks.add(_dur_rank(e["defend"]))
+        return ranks
+
+    def valid_attack_cards(self, uid: int):
+        hand = self.hands[uid]
+        if not self.table:
+            return list(hand)
+        ranks = self.addable_ranks()
+        return [c for c in hand if _dur_rank(c) in ranks]
+
+    def valid_defend_cards(self, uid: int):
+        for e in self.table:
+            if e["defend"] is None:
+                return [c for c in self.hands[uid] if _dur_can_beat(e["attack"], c, self.trump_suit)]
+        return []
+
+    def do_attack(self, uid: int, card: str) -> tuple[bool, str]:
+        if self.finished or uid != self.attacker_id:
+            return False, "❌ Сейчас не твой ход атаковать."
+        if len(self.table) >= self.max_table:
+            return False, "❌ На столе уже максимум карт."
+        if card not in self.valid_attack_cards(uid):
+            return False, "❌ Такой картой сейчас нельзя подкинуть (нет в руке или не подходит по рангу)."
+        self.hands[uid].remove(card)
+        self.table.append({"attack": card, "defend": None})
+        return True, f"➡️ <b>{self.names[uid]}</b> подкидывает: <b>{card}</b>\nСтол: {self.render_table()}"
+
+    def do_defend(self, uid: int, card: str) -> tuple[bool, str]:
+        if self.finished or uid != self.defender_id:
+            return False, "❌ Сейчас не твой ход отбиваться."
+        undefended = next((e for e in self.table if e["defend"] is None), None)
+        if not undefended:
+            return False, "❌ Нечего отбивать."
+        if card not in self.hands[uid] or not _dur_can_beat(undefended["attack"], card, self.trump_suit):
+            return False, "❌ Эта карта не бьёт атакующую."
+        self.hands[uid].remove(card)
+        undefended["defend"] = card
+        return True, f"🛡 <b>{self.names[uid]}</b> отбивается: <b>{card}</b>\nСтол: {self.render_table()}"
+
+    def do_done(self, uid: int) -> tuple[bool, str]:
+        if self.finished or uid != self.attacker_id:
+            return False, "❌ Только атакующий может завершить раунд."
+        if any(e["defend"] is None for e in self.table):
+            return False, "❌ Ещё не все карты отбиты."
+        loser_before = self.other(uid)
+        self._new_round(loser_before)
+        text = "✅ Раунд завершён, карты уходят в отбой."
+        if self.finished:
+            text += "\n\n" + self._finish_text()
+        return True, text
+
+    def do_take(self, uid: int) -> tuple[bool, str]:
+        if self.finished or uid != self.defender_id:
+            return False, "❌ Только защищающийся может взять карты."
+        for e in self.table:
+            self.hands[uid].append(e["attack"])
+            if e["defend"]:
+                self.hands[uid].append(e["defend"])
+        self._new_round(uid)
+        text = f"🖐 <b>{self.names[uid]}</b> забирает карты со стола."
+        if self.finished:
+            text += "\n\n" + self._finish_text()
+        return True, text
+
+    def _finish_text(self) -> str:
+        if self.winner_id is None:
+            return "🤝 <b>Ничья! Колода закончилась одновременно у обоих.</b>"
+        loser_id = self.other(self.winner_id) if self.winner_id in self.hands else None
+        loser_name = self.names.get(loser_id, "???")
+        return f"🏆 <b>{self.names[self.winner_id]} побеждает! {loser_name} остался в дураках!</b>"
+
+    def render_table(self) -> str:
+        if not self.table:
+            return "(пусто)"
+        return "  |  ".join(f"{e['attack']} → {e['defend'] or '❓'}" for e in self.table)
+
+    def status_text(self) -> str:
+        p1, p2 = list(self.hands.keys())
+        return (
+            f"🃏 <b>Дурак: {self.names[p1]} vs {self.names[p2]}</b>\n"
+            f"Козырь: <b>{self.trump_suit}</b>\n\n"
+            f"🎴 Стол: {self.render_table()}\n\n"
+            f"👤 {self.names[p1]}: {len(self.hands[p1])} карт | "
+            f"👤 {self.names[p2]}: {len(self.hands[p2])} карт | "
+            f"🂠 в колоде: {len(self.deck)}\n\n"
+            f"➡️ Атакует: <b>{self.names[self.attacker_id]}</b>\n"
+            f"🛡 Защищается: <b>{self.names[self.defender_id]}</b>"
+        )
+
+    def hand_text(self, uid: int) -> str:
+        hand = sorted(self.hands[uid], key=lambda c: (_dur_suit(c), _dur_value(c)))
+        return "🃏 <b>Твоя рука:</b>\n" + "  ".join(hand)
+
+
+durak_duels: dict[int, DurakDuel] = {}
+durak_pending: dict[int, dict] = {}
+
+
+async def _durak_send_hands(game: DurakDuel):
+    for uid in game.hands:
+        try:
+            await bot.send_message(uid, game.hand_text(uid))
+        except Exception:
+            pass
+
+
+async def _durak_finalize_pvp(chat_id: int, game: DurakDuel):
+    if game.bet > 0 and game.winner_id is not None:
+        loser_id = game.other(game.winner_id)
+        winner = get_user(game.winner_id)
+        loser = get_user(loser_id)
+        if winner and loser and loser["balance"] >= game.bet:
+            update_user(game.winner_id, balance=winner["balance"] + game.bet)
+            update_user(loser_id, balance=max(0, loser["balance"] - game.bet))
+            await bot.send_message(chat_id, f"💰 Ставка <b>{game.bet}</b> монет переходит к {game.names[game.winner_id]}!")
+        change_reputation(game.winner_id, +1)
+    if game.winner_id is not None:
+        contribute_faculty_points(game.winner_id, 15)
+        winner_user = get_user(game.winner_id)
+        if winner_user:
+            check_and_grant_achievements(winner_user)
+    del durak_duels[chat_id]
+
+
+@dp.message(
+    F.chat.type.in_({"group", "supergroup"}),
+    F.text.func(lambda t: t and t.strip().lower().startswith("дурак @") or
+                (t and t.strip().lower().startswith("дурак ") and t.strip().split()[1].isdigit() == False and len(t.strip().split()) <= 3))
+)
+async def durak_challenge(message: Message):
+    chat_id = message.chat.id
+    if chat_id in durak_duels:
+        await message.answer("⚠️ В этом чате уже идёт партия в дурака!")
+        return
+    if chat_id in durak_pending:
+        await message.answer("⚠️ Уже есть неотвеченный вызов на дурака в этом чате.")
+        return
+
+    parts = message.text.strip().split()
+    bet = 0
+    if parts[-1].isdigit():
+        bet = int(parts[-1])
+
+    challenger_id, challenger_name = message.from_user.id, message.from_user.full_name
+    target_id, target_name = None, None
+
+    if message.reply_to_message and message.reply_to_message.from_user:
+        ru = message.reply_to_message.from_user
+        if not ru.is_bot:
+            target_id, target_name = ru.id, ru.full_name
+    elif message.entities:
+        for ent in message.entities:
+            if ent.type == "text_mention" and ent.user:
+                target_id, target_name = ent.user.id, ent.user.full_name
+                break
+            elif ent.type == "mention":
+                uname = message.text[ent.offset:ent.offset + ent.length]
+                try:
+                    cm = await bot.get_chat_member(chat_id, uname)
+                    target_id, target_name = cm.user.id, cm.user.full_name
+                except Exception:
+                    pass
+                break
+
+    if not target_id:
+        await message.answer("❌ Укажи игрока: <code>дурак @username</code> или ответом на сообщение (можно добавить ставку: <code>дурак @username 500</code>)")
+        return
+    if target_id == challenger_id:
+        await message.answer("❌ Нельзя играть с самим собой!")
+        return
+
+    challenger = get_user_safe(challenger_id)
+    if bet > 0 and challenger["balance"] < bet:
+        await message.answer(f"❌ Недостаточно монет для ставки {bet}.")
+        return
+    register_user(target_id)
+    target = get_user(target_id)
+    if not target:
+        await message.answer("❌ Противник не зарегистрирован в игре.")
+        return
+    if bet > 0 and target["balance"] < bet:
+        await message.answer(f"❌ У {target_name} недостаточно монет для ставки {bet}.")
+        return
+
+    durak_pending[chat_id] = {
+        "challenger_id": challenger_id, "challenger_name": challenger_name,
+        "target_id": target_id, "target_name": target_name, "bet": bet,
+    }
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🃏 Принять", callback_data=f"durakpvp_accept:{chat_id}:{target_id}")
+    builder.button(text="🏳️ Отказ", callback_data=f"durakpvp_decline:{chat_id}:{target_id}")
+    builder.adjust(2)
+
+    bet_line = f"\n💰 Ставка: <b>{bet}</b> монет" if bet > 0 else ""
+    await message.answer(
+        f"🃏 <b>ВЫЗОВ НА ДУРАКА!</b>\n\n"
+        f"{challenger_name} вызывает {target_name}!{bet_line}\n\n"
+        f"<a href='tg://user?id={target_id}'>{target_name}</a>, принимаешь?",
+        reply_markup=builder.as_markup()
+    )
+
+    async def auto_cancel():
+        await asyncio.sleep(60)
+        if chat_id in durak_pending:
+            del durak_pending[chat_id]
+            await bot.send_message(chat_id, f"⏰ {target_name} не ответил. Вызов отменён.")
+    asyncio.create_task(auto_cancel())
+
+
+@dp.callback_query(F.data.startswith("durakpvp_accept:"))
+async def cb_durakpvp_accept(callback: CallbackQuery):
+    _, chat_id_str, tid_str = callback.data.split(":")
+    chat_id, tid = int(chat_id_str), int(tid_str)
+    if callback.from_user.id != tid:
+        await callback.answer("Это не твой вызов!", show_alert=True)
+        return
+    pending = durak_pending.get(chat_id)
+    if not pending:
+        await callback.answer("Вызов уже недействителен.", show_alert=True)
+        return
+
+    bet = pending["bet"]
+    c_id, c_name = pending["challenger_id"], pending["challenger_name"]
+    t_id, t_name = pending["target_id"], pending["target_name"]
+    challenger, target = get_user(c_id), get_user(t_id)
+
+    if bet > 0 and (not challenger or not target or challenger["balance"] < bet or target["balance"] < bet):
+        del durak_pending[chat_id]
+        await callback.answer()
+        await callback.message.answer("❌ У одного из игроков не хватает монет. Игра отменена.")
+        return
+
+    del durak_pending[chat_id]
+    game = DurakDuel(chat_id, c_id, c_name, t_id, t_name, bet)
+    durak_duels[chat_id] = game
+
+    await callback.answer()
+    await callback.message.edit_text(
+        f"🃏 <b>ИГРА НАЧАЛАСЬ!</b> Козырь: <b>{game.trump_suit}</b>\n\n"
+        f"Карты отправлены в личные сообщения!\n"
+        f"Ходите командами: <code>кинуть КартаМасть</code> (напр. <code>кинуть 7h</code>), "
+        f"<code>бить КартаМасть</code>, <code>бито</code>, <code>взять</code>\n"
+        f"Масти: s♠ h♥ d♦ c♣"
+    )
+    await _durak_send_hands(game)
+    await callback.message.answer(game.status_text())
+
+
+@dp.callback_query(F.data.startswith("durakpvp_decline:"))
+async def cb_durakpvp_decline(callback: CallbackQuery):
+    _, chat_id_str, tid_str = callback.data.split(":")
+    chat_id, tid = int(chat_id_str), int(tid_str)
+    if callback.from_user.id != tid:
+        await callback.answer("Это не твой вызов!", show_alert=True)
+        return
+    pending = durak_pending.get(chat_id)
+    if not pending:
+        await callback.answer()
+        return
+    del durak_pending[chat_id]
+    await callback.answer()
+    await callback.message.answer(f"🏳️ <b>{pending['target_name']}</b> отказался от игры.")
+
+
+async def _durak_pvp_process_move(message: Message, action: str):
+    chat_id = message.chat.id
+    game = durak_duels.get(chat_id)
+    if not game or game.finished:
+        return
+    uid = message.from_user.id
+    if uid not in game.hands:
+        return
+
+    if action == "done":
+        ok, text = game.do_done(uid)
+    elif action == "take":
+        ok, text = game.do_take(uid)
+    else:
+        parts = message.text.strip().split(maxsplit=1)
+        if len(parts) < 2:
+            await message.answer("❌ Укажи карту, например: <code>кинуть 7h</code>")
+            return
+        card = _dur_parse_card(parts[1])
+        if not card:
+            await message.answer("❌ Не могу распознать карту. Формат: ранг+масть, напр. <code>7h</code>, <code>Ks</code>, <code>10d</code>.")
+            return
+        if action == "attack":
+            ok, text = game.do_attack(uid, card)
+        else:
+            ok, text = game.do_defend(uid, card)
+
+    await message.answer(text)
+    if ok:
+        await _durak_send_hands(game)
+        await message.answer(game.status_text())
+        if game.finished:
+            await _durak_finalize_pvp(chat_id, game)
+
+
+@dp.message(
+    F.chat.type.in_({"group", "supergroup"}),
+    F.text.func(lambda t: t and t.strip().lower().startswith(("кинуть ", "подкинуть ")))
+)
+async def durak_pvp_attack(message: Message):
+    await _durak_pvp_process_move(message, "attack")
+
+
+@dp.message(
+    F.chat.type.in_({"group", "supergroup"}),
+    F.text.func(lambda t: t and t.strip().lower().startswith(("бить ", "покрыть ")))
+)
+async def durak_pvp_defend(message: Message):
+    await _durak_pvp_process_move(message, "defend")
+
+
+@dp.message(
+    F.chat.type.in_({"group", "supergroup"}),
+    F.text.func(lambda t: t and t.strip().lower() == "бито")
+)
+async def durak_pvp_done(message: Message):
+    await _durak_pvp_process_move(message, "done")
+
+
+@dp.message(
+    F.chat.type.in_({"group", "supergroup"}),
+    F.text.func(lambda t: t and t.strip().lower() == "взять")
+)
+async def durak_pvp_take(message: Message):
+    await _durak_pvp_process_move(message, "take")
+
+
+@dp.message(
+    F.chat.type.in_({"group", "supergroup"}),
+    F.text.func(lambda t: t and t.strip().lower() in ("дурак статус", "дурак стол"))
+)
+async def durak_pvp_status(message: Message):
+    game = durak_duels.get(message.chat.id)
+    if not game:
+        await message.answer("Активной игры в дурака нет.")
+        return
+    await message.answer(game.status_text())
+
+
+@dp.message(
+    F.chat.type.in_({"group", "supergroup"}),
+    F.text.func(lambda t: t and t.strip().lower() in ("дурак отмена", "дурак стоп"))
+)
+async def durak_pvp_cancel(message: Message):
+    chat_id = message.chat.id
+    if chat_id not in durak_duels:
+        await message.answer("Нет активной игры для отмены.")
+        return
+    if message.from_user.id not in durak_duels[chat_id].hands:
+        await message.answer("❌ Только участник игры может её отменить.")
+        return
+    del durak_duels[chat_id]
+    await message.answer("🚫 Игра в дурака отменена.")
+
 # =====================================================================
 # БЛЕКДЖЕК
 # =====================================================================
@@ -11419,21 +12324,50 @@ def build_gather_text(user: dict, node_key: str) -> str:
     )
 
 
-def do_upgrade_gather_skill(user: dict, skill_key: str) -> tuple[bool, str]:
+def do_upgrade_gather_skill(user: dict, skill_key: str, amount: int = 1) -> tuple[bool, str]:
     cfg = GATHER_SKILL_CONFIG.get(skill_key)
     if not cfg:
         return False, "❌ Неизвестный навык."
+
+    amount = max(1, min(amount, 100))
     val = user.get(skill_key, 0)
-    cost = max(cfg["cost_base"], val * cfg["cost_base"])
-    if user["balance"] < cost:
-        return False, f"❌ Нужно <b>{cost}</b> монет, есть <b>{user['balance']}</b>."
-    new_val = val + 1
-    update_user(user["user_id"], **{skill_key: new_val, "balance": user["balance"] - cost})
-    text = f"✅ <b>{cfg['label']}</b> прокачан до уровня <b>{new_val}</b>! Потрачено {cost} монет."
+    balance = user["balance"]
+    total_cost = 0
+    levels_bought = 0
+
+    for i in range(amount):
+        next_cost = max(cfg["cost_base"], (val + levels_bought) * cfg["cost_base"])
+        if balance - total_cost < next_cost:
+            break
+        total_cost += next_cost
+        levels_bought += 1
+
+    if levels_bought == 0:
+        first_cost = max(cfg["cost_base"], val * cfg["cost_base"])
+        return False, f"❌ Нужно минимум <b>{first_cost}</b> монет на 1 уровень, есть <b>{balance}</b>."
+
+    new_val = val + levels_bought
+    update_user(user["user_id"], **{skill_key: new_val, "balance": balance - total_cost})
+
+    partial_note = ""
+    if levels_bought < amount:
+        partial_note = f" (запрошено x{amount}, хватило монет только на x{levels_bought})"
+
+    text = (
+        f"✅ <b>{cfg['label']}</b> прокачан на <b>+{levels_bought}</b> ур. → <b>{new_val}</b>!"
+        f"{partial_note}\n💰 Потрачено: {total_cost} монет."
+    )
     mastery_msgs = check_and_grant_mastery(user["user_id"], skill_key, new_val)
     if mastery_msgs:
         text += "\n\n" + "\n".join(mastery_msgs)
     return True, text
+
+
+def _gather_skill_batch_cost(cfg: dict, val: int, amount: int) -> int:
+    total = 0
+    for i in range(amount):
+        total += max(cfg["cost_base"], (val + i) * cfg["cost_base"])
+    return total
 
 
 def build_gather_skills_text(user: dict) -> tuple[str, "InlineKeyboardMarkup"]:
@@ -11441,10 +12375,17 @@ def build_gather_skills_text(user: dict) -> tuple[str, "InlineKeyboardMarkup"]:
     lines = ["🧭 <b>Навыки сбора</b>\n"]
     for key, cfg in GATHER_SKILL_CONFIG.items():
         val = user.get(key, 0)
-        cost = max(cfg["cost_base"], val * cfg["cost_base"])
-        lines.append(f"{cfg['label']}: <b>{val} ур.</b>\n  <i>{cfg['description']}</i>\n  Апгрейд: {cost} монет")
-        builder.button(text=f"⬆️ {cfg['label']} ({cost} мон.)", callback_data=f"upgrade_gskill:{key}")
-    builder.adjust(1)
+        cost1 = _gather_skill_batch_cost(cfg, val, 1)
+        cost5 = _gather_skill_batch_cost(cfg, val, 5)
+        cost10 = _gather_skill_batch_cost(cfg, val, 10)
+        lines.append(
+            f"{cfg['label']}: <b>{val} ур.</b>\n  <i>{cfg['description']}</i>\n"
+            f"  x1: {cost1} мон. | x5: {cost5} мон. | x10: {cost10} мон."
+        )
+        builder.button(text=f"⬆️ {cfg['label']} x1 ({cost1})", callback_data=f"upgrade_gskill:{key}:1")
+        builder.button(text=f"⬆️ x5 ({cost5})", callback_data=f"upgrade_gskill:{key}:5")
+        builder.button(text=f"⬆️ x10 ({cost10})", callback_data=f"upgrade_gskill:{key}:10")
+    builder.adjust(3)
     return "\n\n".join(lines), builder.as_markup()
 
 
@@ -11815,16 +12756,17 @@ async def txt_gather_skills(message: Message):
 
 @dp.callback_query(F.data.startswith("upgrade_gskill:"))
 async def cb_upgrade_gskill(callback: CallbackQuery):
-    key = callback.data.split(":")[1]
+    parts = callback.data.split(":")
+    key = parts[1]
+    amount = int(parts[2]) if len(parts) > 2 else 1
     user = get_user_safe(callback.from_user.id)
-    success, text = do_upgrade_gather_skill(user, key)
+    success, text = do_upgrade_gather_skill(user, key, amount)
     await callback.answer()
     await callback.message.answer(text)
     if success:
         updated = get_user(callback.from_user.id)
         new_text, new_kb = build_gather_skills_text(updated)
         await callback.message.edit_text(new_text, reply_markup=new_kb)
-
 
 @dp.message(F.text.func(lambda t: t and t.strip().lower() in ("ресурсы", "рюкзак сбора")))
 async def txt_resources(message: Message):
@@ -12437,6 +13379,298 @@ async def cb_tool_upgrade(callback: CallbackQuery):
         await callback.message.edit_text(build_tools_text(updated), reply_markup=get_tools_keyboard(updated))
 
 # =====================================================================
+# АВТОМАТИЗАЦИЯ (покупается за кристаллы Вознесения)
+# =====================================================================
+AUTOMATIONS = {
+    "auto_work": {
+        "name": "🤖 Авто-работа", "cost": 150,
+        "description": "Бот сам работает за тебя на кулдауне, пока хватает энергии.",
+    },
+    "auto_hunt": {
+        "name": "🏹 Авто-охота", "cost": 120,
+        "description": "Автоматически ходит на охоту на кулдауне.",
+    },
+    "auto_fish": {
+        "name": "🎣 Авто-рыбалка", "cost": 120,
+        "description": "Автоматически ходит на рыбалку на кулдауне.",
+    },
+    "auto_mine": {
+        "name": "⛏ Авто-шахта", "cost": 120,
+        "description": "Автоматически спускается в шахту на кулдауне.",
+    },
+    "auto_eat": {
+        "name": "🍽 Авто-обед", "cost": 200,
+        "description": "Автоматически покупает еду при низком HP/энергии, но не опускает баланс ниже установленного резерва.",
+    },
+}
+
+CHEAP_HP_ITEMS = sorted(
+    [k for k, v in CONSUMABLES.items() if v["hp"] > 0 and v["hp"] < 9999],
+    key=lambda k: CONSUMABLES[k]["price"] / max(1, CONSUMABLES[k]["hp"])
+)
+CHEAP_ENERGY_ITEMS = sorted(
+    [k for k, v in CONSUMABLES.items() if v["energy"] > 0 and v["energy"] < 9999],
+    key=lambda k: CONSUMABLES[k]["price"] / max(1, CONSUMABLES[k]["energy"])
+)
+
+
+def get_automations_owned(user: dict) -> set:
+    raw = user.get("automations_owned", "") or ""
+    return set(x for x in raw.split(",") if x)
+
+def save_automations_owned(user_id: int, owned: set):
+    update_user(user_id, automations_owned=",".join(owned))
+
+def get_automations_enabled(user: dict) -> set:
+    raw = user.get("automations_enabled", "") or ""
+    return set(x for x in raw.split(",") if x)
+
+def save_automations_enabled(user_id: int, enabled: set):
+    update_user(user_id, automations_enabled=",".join(enabled))
+
+
+def do_buy_automation(user: dict, key: str) -> tuple[bool, str]:
+    cfg = AUTOMATIONS.get(key)
+    if not cfg:
+        return False, "❌ Неизвестная автоматизация."
+    owned = get_automations_owned(user)
+    if key in owned:
+        return False, "✅ У тебя уже есть эта автоматизация."
+    if user.get("ascension_crystals", 0) < cfg["cost"]:
+        return False, f"❌ Нужно <b>{cfg['cost']}</b> 🌌 кристаллов, есть <b>{user.get('ascension_crystals', 0)}</b>."
+    owned.add(key)
+    save_automations_owned(user["user_id"], owned)
+    enabled = get_automations_enabled(user)
+    enabled.add(key)
+    save_automations_enabled(user["user_id"], enabled)
+    update_user(user["user_id"], ascension_crystals=user.get("ascension_crystals", 0) - cfg["cost"])
+    return True, f"✅ Приобретено: <b>{cfg['name']}</b>! Автоматически включено."
+
+
+def build_automation_text(user: dict) -> str:
+    owned = get_automations_owned(user)
+    enabled = get_automations_enabled(user)
+    reserve = user.get("auto_eat_reserve", 0)
+    lines = [
+        "🤖 <b>Автоматизация</b>\n",
+        f"🌌 Кристаллов: <b>{user.get('ascension_crystals', 0)}</b>\n",
+        "<i>Работает в фоне раз в ~1 минуту, даже когда ты не в чате.</i>\n",
+    ]
+    for key, cfg in AUTOMATIONS.items():
+        if key in owned:
+            status = "🟢 включено" if key in enabled else "🔴 выключено"
+            lines.append(f"<b>{cfg['name']}</b> — куплено, {status}\n  <i>{cfg['description']}</i>")
+        else:
+            lines.append(f"<b>{cfg['name']}</b> — {cfg['cost']} 🌌\n  <i>{cfg['description']}</i>")
+    if "auto_eat" in owned:
+        lines.append(
+            f"\n🍽 Резерв авто-обеда: не тратить монеты ниже <b>{reserve}</b>.\n"
+            f"Изменить: <code>автообед 1000</code>"
+        )
+    return "\n\n".join(lines)
+
+
+def get_automation_keyboard(user: dict) -> InlineKeyboardMarkup:
+    owned = get_automations_owned(user)
+    enabled = get_automations_enabled(user)
+    builder = InlineKeyboardBuilder()
+    for key, cfg in AUTOMATIONS.items():
+        if key in owned:
+            label = "🔴 Выключить" if key in enabled else "🟢 Включить"
+            builder.button(text=f"{label}: {cfg['name']}", callback_data=f"auto_toggle:{key}")
+        else:
+            builder.button(text=f"💠 Купить {cfg['name']} ({cfg['cost']} 🌌)", callback_data=f"auto_buy:{key}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+@dp.message(Command("automation"))
+@dp.message(F.text.func(lambda t: t and t.strip().lower() in ("автоматизация", "авто", "automation")))
+async def cmd_automation(message: Message):
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
+    await message.answer(build_automation_text(user), reply_markup=get_automation_keyboard(user))
+
+
+@dp.callback_query(F.data.startswith("auto_buy:"))
+async def cb_auto_buy(callback: CallbackQuery):
+    key = callback.data.split(":")[1]
+    user = get_user_safe(callback.from_user.id)
+    success, text = do_buy_automation(user, key)
+    await callback.answer()
+    await callback.message.answer(text)
+    if success:
+        updated = get_user(callback.from_user.id)
+        await callback.message.edit_text(build_automation_text(updated), reply_markup=get_automation_keyboard(updated))
+
+
+@dp.callback_query(F.data.startswith("auto_toggle:"))
+async def cb_auto_toggle(callback: CallbackQuery):
+    key = callback.data.split(":")[1]
+    user = get_user_safe(callback.from_user.id)
+    owned = get_automations_owned(user)
+    if key not in owned:
+        await callback.answer("Сначала купи эту автоматизацию!", show_alert=True)
+        return
+    enabled = get_automations_enabled(user)
+    if key in enabled:
+        enabled.discard(key)
+        msg = "🔴 Выключено."
+    else:
+        enabled.add(key)
+        msg = "🟢 Включено."
+    save_automations_enabled(user["user_id"], enabled)
+    await callback.answer(msg, show_alert=True)
+    updated = get_user(callback.from_user.id)
+    await callback.message.edit_text(build_automation_text(updated), reply_markup=get_automation_keyboard(updated))
+
+
+@dp.message(F.text.func(lambda t: t and t.strip().lower().startswith("автообед ")))
+async def txt_set_auto_eat_reserve(message: Message):
+    parts = message.text.strip().split()
+    if len(parts) != 2 or not parts[1].isdigit():
+        await message.answer("❌ Формат: <code>автообед 1000</code> — не тратить монеты ниже этого баланса.")
+        return
+    reserve = int(parts[1])
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
+    if "auto_eat" not in get_automations_owned(user):
+        await message.answer("❌ Сначала купи 🍽 Авто-обед в /automation.")
+        return
+    update_user(message.from_user.id, auto_eat_reserve=reserve)
+    await message.answer(f"✅ Резерв авто-обеда установлен: <b>{reserve}</b> монет.")
+
+
+def do_auto_eat(user: dict) -> str:
+    """Лечит HP/энергию самым дешёвым подходящим товаром, не трогая резерв баланса."""
+    max_hp = get_max_hp(user)
+    max_energy = get_max_energy(user)
+    reserve = user.get("auto_eat_reserve", 0)
+    messages = []
+    fresh = user
+
+    if fresh["hp"] < max_hp * 0.4:
+        for key in CHEAP_HP_ITEMS:
+            item = CONSUMABLES[key]
+            if fresh["balance"] - item["price"] < reserve:
+                continue
+            need = max_hp - fresh["hp"]
+            qty = max(1, min(10, -(-need // item["hp"])))  # округление вверх
+            while qty > 0 and fresh["balance"] - item["price"] * qty < reserve:
+                qty -= 1
+            if qty <= 0:
+                continue
+            ok, txt = do_use_consumable(fresh, key, qty)
+            if ok:
+                messages.append(f"🍽 Авто-лечение: {item['name']} x{qty}")
+                fresh = get_user(user["user_id"])
+            break
+
+    if fresh["energy"] < max_energy * 0.4:
+        for key in CHEAP_ENERGY_ITEMS:
+            item = CONSUMABLES[key]
+            if fresh["balance"] - item["price"] < reserve:
+                continue
+            need = max_energy - fresh["energy"]
+            qty = max(1, min(10, -(-need // item["energy"])))
+            while qty > 0 and fresh["balance"] - item["price"] * qty < reserve:
+                qty -= 1
+            if qty <= 0:
+                continue
+            ok, txt = do_use_consumable(fresh, key, qty)
+            if ok:
+                messages.append(f"🍽 Авто-заряд: {item['name']} x{qty}")
+            break
+
+    return "\n".join(messages)
+
+
+async def auto_features_scheduler():
+    await asyncio.sleep(30)
+    while True:
+        try:
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT user_id FROM users "
+                        "WHERE automations_enabled IS NOT NULL AND automations_enabled != ''"
+                    )
+                    user_ids = [r[0] for r in cur.fetchall()]
+
+            for uid in user_ids:
+                try:
+                    user = get_user(uid)
+                    if not user or user.get("is_banned"):
+                        continue
+                    enabled = get_automations_enabled(user)
+                    if not enabled:
+                        continue
+
+                    messages = []
+
+                    if "auto_eat" in enabled:
+                        eat_msg = do_auto_eat(user)
+                        if eat_msg:
+                            messages.append(eat_msg)
+                        user = get_user(uid)
+
+                    if is_incapacitated(user):
+                        if messages:
+                            try:
+                                await bot.send_message(uid, "🤖 <b>Авто-отчёт:</b>\n\n" + "\n\n".join(messages))
+                            except Exception:
+                                pass
+                        continue
+
+                    if "auto_work" in enabled and user.get("job") != "Безработный":
+                        ok, text = do_work(user)
+                        if ok:
+                            messages.append(text)
+                            user = get_user(uid)
+
+                    for auto_key, node_key in (("auto_hunt", "hunting"), ("auto_fish", "fishing"), ("auto_mine", "mining")):
+                        if auto_key in enabled:
+                            ok, text = do_gather(user, node_key, 1)
+                            if ok:
+                                messages.append(text)
+                                user = get_user(uid)
+
+                    if messages:
+                        try:
+                            await bot.send_message(uid, "🤖 <b>Авто-отчёт:</b>\n\n" + "\n\n".join(messages))
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                await asyncio.sleep(0.05)
+        except Exception:
+            pass
+        await asyncio.sleep(60)
+
+GATHER_SKILL_ALIASES = {
+    "охота": "hunting_level", "hunting": "hunting_level",
+    "рыбалка": "fishing_level", "fishing": "fishing_level",
+    "шахта": "mining_level", "mining": "mining_level",
+}
+
+@dp.message(F.text.func(lambda t: t and t.strip().lower().startswith("качать ")))
+async def txt_gather_skill_upgrade(message: Message):
+    parts = message.text.strip().lower().split()
+    if len(parts) < 2:
+        await message.answer("❌ Формат: <code>качать охота x10</code>")
+        return
+    skill_name = parts[1]
+    skill_key = GATHER_SKILL_ALIASES.get(skill_name)
+    if not skill_key:
+        await message.answer("❌ Укажи: охота / рыбалка / шахта")
+        return
+    amount = 1
+    if len(parts) >= 3 and parts[2].lstrip("x").isdigit():
+        amount = int(parts[2].lstrip("x"))
+
+    user = get_user_safe(message.from_user.id, message.from_user.username or message.from_user.full_name)
+    success, text = do_upgrade_gather_skill(user, skill_key, amount)
+    await message.answer(text)
+
+# =====================================================================
 # ТОЧКА ВХОДА
 # =====================================================================
 async def main():
@@ -12445,6 +13679,7 @@ async def main():
     ensure_faculty_rows()
     asyncio.create_task(auto_event_scheduler())
     asyncio.create_task(auto_world_boss_scheduler())
+    asyncio.create_task(auto_features_scheduler())   # ← добавить
     print("✅ PostgreSQL БД инициализирована. Бот КТУ Манас запускается...")
     await dp.start_polling(bot)
 
